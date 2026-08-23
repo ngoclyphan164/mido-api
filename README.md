@@ -84,8 +84,17 @@ Routes có prefix `/v1`, trừ `GET /health` (cố tình để ngoài, cho uptim
 4. **`DATABASE_URL` phải trỏ Supavisor transaction pooler (port 6543)** và `postgres.js` phải
    set `prepare: false` — transaction mode không hỗ trợ prepared statement. Migration thì dùng
    `DIRECT_URL` (port 5432).
-5. `vercel.json` ở repo này **chỉ** để khai báo `crons` và `maxDuration`, không phải để cấu hình
-   build. Build là zero-config.
+5. **`vercel.json` ở repo này chỉ khai báo `crons`.** Đừng thêm block `functions` để set
+   `maxDuration` — key `functions` chỉ nhận glob khớp file function thật trong `api/`, mà deploy
+   zero-config không tạo file nào ở đó, nên `"src/main.ts"` sẽ làm deploy fail với:
+
+   > The pattern "src/main.ts" defined in `functions` doesn't match any Serverless Functions
+   > inside the `api` directory.
+
+   (Tài liệu Vercel có hướng dẫn key theo entrypoint, nhưng **chỉ cho framework Python** như
+   `app/main.py`.) Muốn đổi max duration thì vào Project → Settings → Functions → Function Max
+   Duration. Mặc định đã là **300s trên mọi plan** nên hầu như không cần đổi: pipeline gọi Places
+   + Routes chỉ mất vài giây.
 
 ## Env vars
 

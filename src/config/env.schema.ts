@@ -8,10 +8,18 @@ export const envSchema = z.object({
   NODE_ENV: z.enum(['development', 'test', 'production']).default('development'),
   PORT: z.coerce.number().int().positive().default(3000),
 
-  /** Danh sách origin cho CORS, phân tách bằng dấu phẩy. */
+  /**
+   * Origin cho CORS, phân tách bằng dấu phẩy. CORS chỉ liên quan tới client chạy
+   * trong browser (Expo web, web dashboard) — app native không gửi header `Origin`
+   * và bỏ qua response header, nên với app iOS/Android biến này vô nghĩa.
+   *
+   * Để trống = không client browser nào được phép. Dùng `*` để cho phép mọi origin
+   * (chỉ nên dùng ở local). Không bỏ custom scheme kiểu `mido://` vào đây — deep
+   * link không phải CORS origin.
+   */
   ALLOWED_ORIGINS: z
     .string()
-    .default('*')
+    .default('')
     .transform((value) =>
       value
         .split(',')

@@ -27,10 +27,23 @@ async function bootstrap(): Promise<void> {
 
   app.use(helmet({ contentSecurityPolicy: false }));
 
-  app.enableCors({
-    origin: config.get<string[]>('ALLOWED_ORIGINS') ?? '*',
-    credentials: true,
-  });
+  // CORS chỉ có tác dụng với client browser. App native không gửi `Origin` nên
+  // không bị ảnh hưởng — và CORS không phải lớp bảo mật của API, việc đó là của
+  // guard xác thực. Ai cũng curl được endpoint bất kể cấu hình ở đây.
+  const allowedOrigins = config.get<string[]>('ALLOWED_ORIGINS') ?? [];
+
+  if (allowedOrigins.length > 0) {
+    app.enableCors({
+      origin: allowedOrigins.includes('*') ? true : allowedOrigins,
+      // Auth dùng Bearer token trong header, không dùng cookie. Bật credentials
+      // cùng với origin `*` còn bị browser từ chối theo spec.
+      credentials: false,
+      methods: ['GET', 'POST', 'PATCH', 'DELETE', 'OPTIONS'],
+      allowedHeaders: ['Authorization', 'Content-Type'],
+      maxAge: 86_400,
+    });
+    logger.log(`CORS bật cho: ${allowedOrigins.join(', ')}`);
+  }
 
   app.setGlobalPrefix('v1', {
     exclude: [
