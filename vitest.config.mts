@@ -6,6 +6,7 @@ export default defineConfig({
     globals: true,
     root: './',
     include: ['src/**/*.spec.ts'],
+    setupFiles: ['./test/setup-env.ts'],
     environment: 'node',
     coverage: {
       provider: 'v8',
@@ -13,8 +14,13 @@ export default defineConfig({
       include: ['src/**/*.ts'],
       exclude: ['src/**/*.spec.ts', 'src/main.ts', 'src/**/*.module.ts'],
       thresholds: {
-        // midpoint/ là phần dễ sai âm thầm — giữ ngưỡng cao ở đó khi Phase 2 xong
         lines: 0,
+        'src/midpoint/**': {
+          statements: 80,
+          branches: 65,
+          functions: 90,
+          lines: 85,
+        },
       },
     },
   },

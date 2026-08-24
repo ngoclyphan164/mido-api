@@ -29,6 +29,25 @@ export const envSchema = z.object({
 
   /** Bí mật dùng để chặn các route cron của Vercel. */
   CRON_SECRET: z.string().min(16).optional(),
+
+  // Tên biến giữ nguyên đúng theo Supabase Integration prefix DATABASE.
+  // Runtime dùng POSTGRES_URL qua Supavisor transaction pooler.
+  DATABASE_POSTGRES_URL: z.string().url(),
+  DATABASE_POOL_SIZE: z.coerce.number().int().min(1).max(10).default(3),
+  DATABASE_SUPABASE_URL: z
+    .string()
+    .url()
+    .transform((value) => value.replace(/\/$/, '')),
+
+  // Provider chỉ fail khi thực sự được gọi, để health/auth vẫn boot được ở
+  // môi trường chưa bật Google Maps. Budget là hàng rào best-effort trên mỗi
+  // Vercel instance; quota cứng vẫn phải cấu hình trong Google Cloud Console.
+  GOOGLE_MAPS_API_KEY: z.string().min(20).optional(),
+  GOOGLE_MAPS_TIMEOUT_MS: z.coerce.number().int().min(1_000).max(30_000).default(8_000),
+  GOOGLE_PLACES_DAILY_REQUEST_LIMIT: z.coerce.number().int().min(1).default(500),
+  GOOGLE_ROUTES_DAILY_ELEMENT_LIMIT: z.coerce.number().int().min(1).default(10_000),
+  GOOGLE_CIRCUIT_FAILURE_THRESHOLD: z.coerce.number().int().min(1).max(20).default(3),
+  GOOGLE_CIRCUIT_RESET_MS: z.coerce.number().int().min(1_000).max(300_000).default(30_000),
 });
 
 export type Env = z.infer<typeof envSchema>;

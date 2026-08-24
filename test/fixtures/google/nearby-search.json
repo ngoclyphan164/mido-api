@@ -1,0 +1,26 @@
+{
+  "places": [
+    {
+      "id": "ChIJ-fixture-cafe",
+      "displayName": { "text": "Cà phê Fixture", "languageCode": "vi" },
+      "location": { "latitude": 10.7761, "longitude": 106.7009 },
+      "primaryType": "cafe",
+      "types": ["cafe", "coffee_shop", "food"],
+      "rating": 4.6,
+      "userRatingCount": 321,
+      "priceLevel": "PRICE_LEVEL_MODERATE",
+      "regularOpeningHours": {
+        "periods": [
+          {
+            "open": { "day": 1, "hour": 7, "minute": 0 },
+            "close": { "day": 1, "hour": 22, "minute": 30 }
+          }
+        ],
+        "weekdayDescriptions": ["Thứ Hai: 07:00–22:30"]
+      },
+      "googleMapsUri": "https://maps.google.com/?cid=fixture",
+      "businessStatus": "OPERATIONAL",
+      "utcOffsetMinutes": 420
+    }
+  ]
+}
