@@ -1,4 +1,15 @@
-import { Body, Controller, Get, HttpCode, HttpStatus, Param, Post, Put } from '@nestjs/common';
+import {
+  Body,
+  Controller,
+  Delete,
+  Get,
+  HttpCode,
+  HttpStatus,
+  Param,
+  Patch,
+  Post,
+  Put,
+} from '@nestjs/common';
 import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
 
 import type { AuthUser } from '../auth/auth.types';
@@ -7,6 +18,7 @@ import {
   CreateHangoutDto,
   HangoutGroupIdParamsDto,
   HangoutIdParamsDto,
+  UpdateHangoutDto,
   UpsertParticipantDto,
 } from './dto/hangout.dto';
 import { HangoutService } from './hangout.service';
@@ -46,6 +58,29 @@ export class HangoutController {
   })
   detail(@Param() params: HangoutIdParamsDto, @CurrentUser() user: AuthUser) {
     return this.hangouts.detail(params.id, user.id);
+  }
+
+  @Patch('hangouts/:id')
+  @ApiOperation({ summary: 'Sửa kèo đang draft/voting; creator hoặc owner/admin' })
+  update(
+    @Param() params: HangoutIdParamsDto,
+    @Body() body: UpdateHangoutDto,
+    @CurrentUser() user: AuthUser,
+  ) {
+    return this.hangouts.update(params.id, user.id, {
+      activityType: body.activityType,
+      plannedAt: body.plannedAt === undefined ? undefined : new Date(body.plannedAt),
+      fairnessMode: body.fairnessMode,
+      budgetMax: body.budgetMax,
+      timeCapSeconds: body.timeCapSeconds,
+    });
+  }
+
+  @Delete('hangouts/:id')
+  @HttpCode(HttpStatus.NO_CONTENT)
+  @ApiOperation({ summary: 'Xóa kèo chưa chốt; creator hoặc owner/admin' })
+  async remove(@Param() params: HangoutIdParamsDto, @CurrentUser() user: AuthUser): Promise<void> {
+    await this.hangouts.remove(params.id, user.id);
   }
 
   @Put('hangouts/:id/participants/me')

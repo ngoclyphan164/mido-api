@@ -72,7 +72,7 @@ export const groups = pgTable(
     inviteExpiresAt: timestamp('invite_expires_at', { withTimezone: true }).notNull(),
     createdBy: uuid('created_by')
       .notNull()
-      .references(() => profiles.id, { onDelete: 'restrict' }),
+      .references(() => profiles.id, { onDelete: 'cascade' }),
     ...timestamps,
   },
   (table) => [
@@ -132,7 +132,7 @@ export const hangouts = pgTable(
       .references(() => groups.id, { onDelete: 'cascade' }),
     createdBy: uuid('created_by')
       .notNull()
-      .references(() => profiles.id, { onDelete: 'restrict' }),
+      .references(() => profiles.id, { onDelete: 'cascade' }),
     activityType: varchar('activity_type', { length: 50 }).notNull(),
     plannedAt: timestamp('planned_at', { withTimezone: true }).notNull(),
     fairnessMode: fairnessModeEnum('fairness_mode').default('balanced').notNull(),
@@ -164,9 +164,10 @@ export const participants = pgTable(
     // Guest cũng là Supabase anonymous user nên luôn có auth subject ổn định trong session.
     userId: uuid('user_id')
       .notNull()
-      .references(() => profiles.id, { onDelete: 'restrict' }),
+      .references(() => profiles.id, { onDelete: 'cascade' }),
     displayName: varchar('display_name', { length: 100 }).notNull(),
     origin: geographyPoint('origin').notNull(),
+    originAddress: varchar('origin_address', { length: 512 }),
     travelMode: travelModeEnum('travel_mode').default('two_wheeler').notNull(),
     weight: numeric('weight', { precision: 3, scale: 2 }).default('1.00').notNull(),
     isFlexible: boolean('is_flexible').default(false).notNull(),
@@ -176,6 +177,10 @@ export const participants = pgTable(
     uniqueIndex('participants_hangout_user_uidx').on(table.hangoutId, table.userId),
     index('participants_origin_gist_idx').using('gist', table.origin),
     check('participants_display_name_not_blank', sql`length(trim(${table.displayName})) > 0`),
+    check(
+      'participants_origin_address_not_blank',
+      sql`${table.originAddress} is null or length(trim(${table.originAddress})) > 0`,
+    ),
     check('participants_weight_range', sql`${table.weight} between 0.60 and 1.40`),
   ],
 ).enableRLS();
@@ -302,7 +307,9 @@ export const suggestions = pgTable(
   (table) => [
     uniqueIndex('suggestions_hangout_place_uidx').on(table.hangoutId, table.placeRefId),
     index('suggestions_hangout_active_idx').on(table.hangoutId, table.isActive),
-    check('suggestions_rank_range', sql`${table.rank} between 1 and 10`),
+    // Trần 20 khớp với `SuggestDto.topN`: client xin nguyên pool một lần rồi tự
+    // xoay vòng 5 option mỗi lần bấm "tìm lại", nên rank 11..20 là hợp lệ.
+    check('suggestions_rank_range', sql`${table.rank} between 1 and 20`),
   ],
 ).enableRLS();
 
@@ -339,9 +346,8 @@ export const outings = pgTable(
     chosenSuggestionId: uuid('chosen_suggestion_id').references(() => suggestions.id, {
       onDelete: 'set null',
     }),
-    decidedBy: uuid('decided_by')
-      .notNull()
-      .references(() => profiles.id, { onDelete: 'restrict' }),
+    // Giữ kết quả chung khi người chốt xóa tài khoản, nhưng bỏ liên kết nhận dạng.
+    decidedBy: uuid('decided_by').references(() => profiles.id, { onDelete: 'set null' }),
     decidedAt: timestamp('decided_at', { withTimezone: true }).defaultNow().notNull(),
     happenedAt: timestamp('happened_at', { withTimezone: true }),
     ...timestamps,
@@ -349,6 +355,76 @@ export const outings = pgTable(
   (table) => [
     uniqueIndex('outings_hangout_uidx').on(table.hangoutId),
     index('outings_chosen_suggestion_idx').on(table.chosenSuggestionId),
+  ],
+).enableRLS();
+
+/**
+ * Snapshot nội dung provider cho từng option của một kèo.
+ *
+ * ĐÂY LÀ NGOẠI LỆ CÓ CHỦ ĐÍCH, KHÔNG PHẢI SƠ SUẤT. `place_content_cache` và
+ * `route_matrix_cache` cấm `google_maps` bằng check constraint vì chúng là cache
+ * tạm; bảng này thì ngược lại — nó là bản ghi của một lần lên kèo, giữ vĩnh
+ * viễn để xem lại lịch sử và để không ai phải trả tiền `/suggest` lần hai.
+ * Chủ sản phẩm đã cân nhắc và chọn như vậy: không TTL, không nằm trong
+ * `prune-cache`.
+ *
+ * Hệ quả cần biết trước khi sửa: cả place content lẫn route duration được giữ
+ * quá thời hạn mà điều khoản Google Maps Platform cho phép. Muốn quay về đúng
+ * điều khoản thì bỏ bảng này; `external_place_id` là thứ duy nhất chắc chắn
+ * được lưu lâu dài.
+ *
+ * Một hàng cho mỗi suggestion. `/suggest` bị chặn khi kèo đã `decided`/`done`
+ * nên hàng của option được chốt không bao giờ bị ghi đè — đó là lý do outing
+ * không cần bảng riêng, nó đọc qua `outings.chosen_suggestion_id`.
+ *
+ * Ảnh KHÔNG lưu URL vĩnh viễn: `photoUri` của Google hết hạn sau ít phút. Lưu
+ * resource name (`places/{place}/photos/{photo}`), còn `photo_uri` chỉ là bản
+ * dùng lại trong vài phút để mở đi mở lại không tốn thêm request Place Photo.
+ */
+export const suggestionPlaces = pgTable(
+  'suggestion_places',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    suggestionId: uuid('suggestion_id')
+      .notNull()
+      .references(() => suggestions.id, { onDelete: 'cascade' }),
+    provider: varchar('provider', { length: 40 }).notNull(),
+    externalPlaceId: varchar('external_place_id', { length: 255 }).notNull(),
+    name: varchar('name', { length: 255 }).notNull(),
+    formattedAddress: varchar('formatted_address', { length: 512 }),
+    geog: geographyPoint('geog').notNull(),
+    primaryType: varchar('primary_type', { length: 80 }),
+    types: text('types').array().notNull(),
+    rating: numeric('rating', { precision: 3, scale: 2 }),
+    userRatingCount: integer('user_rating_count'),
+    priceLevel: integer('price_level'),
+    mapsUri: varchar('maps_uri', { length: 512 }),
+    photoNames: text('photo_names').array().notNull(),
+    photoUri: varchar('photo_uri', { length: 2048 }),
+    photoUriFetchedAt: timestamp('photo_uri_fetched_at', { withTimezone: true }),
+    availability: varchar('availability', { length: 16 }).notNull(),
+    score: numeric('score', { precision: 8, scale: 4 }),
+    scoreBreakdown: jsonb('score_breakdown'),
+    /** `{ participantId, name, durationSec, distanceMeters?, mode }[]`. */
+    travelTimes: jsonb('travel_times').notNull(),
+    fetchedAt: timestamp('fetched_at', { withTimezone: true }).defaultNow().notNull(),
+  },
+  (table) => [
+    uniqueIndex('suggestion_places_suggestion_uidx').on(table.suggestionId),
+    index('suggestion_places_provider_external_idx').on(table.provider, table.externalPlaceId),
+    check('suggestion_places_name_not_blank', sql`length(trim(${table.name})) > 0`),
+    check(
+      'suggestion_places_rating_range',
+      sql`${table.rating} is null or ${table.rating} between 0 and 5`,
+    ),
+    check(
+      'suggestion_places_rating_count_non_negative',
+      sql`${table.userRatingCount} is null or ${table.userRatingCount} >= 0`,
+    ),
+    check(
+      'suggestion_places_price_level_range',
+      sql`${table.priceLevel} is null or ${table.priceLevel} between 0 and 4`,
+    ),
   ],
 ).enableRLS();
 
@@ -365,7 +441,7 @@ export const fairnessLedger = pgTable(
       .references(() => groups.id, { onDelete: 'cascade' }),
     userId: uuid('user_id')
       .notNull()
-      .references(() => profiles.id, { onDelete: 'restrict' }),
+      .references(() => profiles.id, { onDelete: 'cascade' }),
     outingId: uuid('outing_id')
       .notNull()
       .references(() => outings.id, { onDelete: 'cascade' }),

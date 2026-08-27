@@ -38,6 +38,9 @@ export const envSchema = z.object({
     .string()
     .url()
     .transform((value) => value.replace(/\/$/, '')),
+  // Chỉ tồn tại ở backend. Dùng để xóa auth user qua Supabase Admin API;
+  // tuyệt đối không đưa key này vào app Expo hay biến EXPO_PUBLIC_*.
+  DATABASE_SUPABASE_SERVICE_ROLE_KEY: z.string().min(20),
 
   // Provider chỉ fail khi thực sự được gọi, để health/auth vẫn boot được ở
   // môi trường chưa bật Google Maps. Budget là hàng rào best-effort trên mỗi
@@ -45,9 +48,20 @@ export const envSchema = z.object({
   GOOGLE_MAPS_API_KEY: z.string().min(20).optional(),
   GOOGLE_MAPS_TIMEOUT_MS: z.coerce.number().int().min(1_000).max(30_000).default(8_000),
   GOOGLE_PLACES_DAILY_REQUEST_LIMIT: z.coerce.number().int().min(1).default(500),
+  GOOGLE_TEXT_SEARCH_DAILY_REQUEST_LIMIT: z.coerce.number().int().min(1).default(500),
+  // Place Details chỉ chạy đúng một lần cho mỗi kèo được chốt, cộng vài lần
+  // lấp snapshot cho kèo chốt từ trước khi có bảng `outing_places`.
+  GOOGLE_PLACE_DETAILS_DAILY_REQUEST_LIMIT: z.coerce.number().int().min(1).default(500),
   GOOGLE_ROUTES_DAILY_ELEMENT_LIMIT: z.coerce.number().int().min(1).default(10_000),
   GOOGLE_CIRCUIT_FAILURE_THRESHOLD: z.coerce.number().int().min(1).max(20).default(3),
   GOOGLE_CIRCUIT_RESET_MS: z.coerce.number().int().min(1_000).max(300_000).default(30_000),
+
+  // Ảnh địa điểm: mỗi place trả về tốn đúng 1 call Place Photo, nên budget này
+  // nên đặt xấp xỉ (số lần /suggest mỗi ngày × topN). Client xin nguyên pool 20
+  // để tự xoay vòng, nên mặc định phải cao hơn hẳn các budget còn lại.
+  GOOGLE_PLACE_PHOTO_DAILY_REQUEST_LIMIT: z.coerce.number().int().min(1).default(2_000),
+  GOOGLE_PLACE_PHOTO_MAX_WIDTH_PX: z.coerce.number().int().min(100).max(4_800).default(800),
+  GOOGLE_PLACES_LANGUAGE_CODE: z.string().min(2).max(10).default('vi'),
 });
 
 export type Env = z.infer<typeof envSchema>;

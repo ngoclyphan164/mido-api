@@ -1,5 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import { and, eq, sql } from 'drizzle-orm';
+import { alias } from 'drizzle-orm/pg-core';
 
 import { DatabaseService } from '../database/database.service';
 import { groupMembers, groups, profiles } from '../database/schema';
@@ -36,7 +37,15 @@ export type JoinResult =
 export type RotateResult =
   { kind: 'ok'; inviteCode: string; inviteExpiresAt: Date } | { kind: 'not_found' | 'forbidden' };
 
+export type UpdateGroupResult =
+  { kind: 'ok'; group: GroupDetailView } | { kind: 'not_found' | 'forbidden' };
+
+export type DeleteGroupResult = { kind: 'ok' } | { kind: 'not_found' | 'forbidden' };
+
 const INVITE_COLLISION_RETRIES = 5;
+
+/** Second alias on group_members, for counting every member of a group. */
+const allMembers = alias(groupMembers, 'all_members');
 
 @Injectable()
 export class GroupRepository {
@@ -86,14 +95,17 @@ export class GroupRepository {
         inviteExpiresAt: groups.inviteExpiresAt,
         createdBy: groups.createdBy,
         createdAt: groups.createdAt,
-        memberCount: sql<number>`(
-          select count(*)::int from ${groupMembers} as counted
-          where counted.group_id = ${groups.id}
-        )`,
+        // Counted over a second alias so the caller's own membership row (the
+        // one this query joins on) doesn't cap the count at one. A correlated
+        // subquery would work today only because group_members has no `id`
+        // column for Drizzle's unqualified rendering to collide with.
+        memberCount: sql<number>`count(${allMembers.userId})::int`,
       })
       .from(groups)
       .innerJoin(groupMembers, eq(groupMembers.groupId, groups.id))
+      .leftJoin(allMembers, eq(allMembers.groupId, groups.id))
       .where(eq(groupMembers.userId, userId))
+      .groupBy(groups.id, groupMembers.role)
       .orderBy(groups.createdAt);
 
     return rows.map((row) => ({ ...row, memberCount: Number(row.memberCount) }));
@@ -136,6 +148,35 @@ export class GroupRepository {
       .innerJoin(profiles, eq(profiles.id, groupMembers.userId))
       .where(eq(groupMembers.groupId, groupId))
       .orderBy(groupMembers.joinedAt, groupMembers.userId);
+  }
+
+  async update(groupId: string, userId: string, name: string): Promise<UpdateGroupResult> {
+    const role = await this.findMemberRole(groupId, userId);
+    if (!role) return { kind: 'not_found' };
+    if (role === 'member') return { kind: 'forbidden' };
+
+    const [updated] = await this.database.db
+      .update(groups)
+      .set({ name, updatedAt: new Date() })
+      .where(eq(groups.id, groupId))
+      .returning({ id: groups.id });
+    if (!updated) return { kind: 'not_found' };
+
+    const group = await this.findDetail(groupId, userId);
+    if (!group) return { kind: 'not_found' };
+    return { kind: 'ok', group };
+  }
+
+  async remove(groupId: string, userId: string): Promise<DeleteGroupResult> {
+    const role = await this.findMemberRole(groupId, userId);
+    if (!role) return { kind: 'not_found' };
+    if (role !== 'owner') return { kind: 'forbidden' };
+
+    const [deleted] = await this.database.db
+      .delete(groups)
+      .where(eq(groups.id, groupId))
+      .returning({ id: groups.id });
+    return deleted ? { kind: 'ok' } : { kind: 'not_found' };
   }
 
   async joinByInviteCode(userId: string, rawCode: string): Promise<JoinResult> {
@@ -205,6 +246,16 @@ export class GroupRepository {
     }
 
     throw new Error('Không sinh được invite code sau nhiều lần thử');
+  }
+
+  private async findMemberRole(groupId: string, userId: string): Promise<GroupRole | undefined> {
+    const [membership] = await this.database.db
+      .select({ role: groupMembers.role })
+      .from(groupMembers)
+      .innerJoin(groups, eq(groups.id, groupMembers.groupId))
+      .where(and(eq(groupMembers.groupId, groupId), eq(groupMembers.userId, userId)))
+      .limit(1);
+    return membership?.role;
   }
 
   private isInviteCollision(error: unknown): boolean {

@@ -38,7 +38,7 @@ async function bootstrap(): Promise<void> {
       // Auth dùng Bearer token trong header, không dùng cookie. Bật credentials
       // cùng với origin `*` còn bị browser từ chối theo spec.
       credentials: false,
-      methods: ['GET', 'POST', 'PATCH', 'DELETE', 'OPTIONS'],
+      methods: ['GET', 'POST', 'PATCH', 'DELETE', 'OPTIONS', 'PUT'],
       allowedHeaders: ['Authorization', 'Content-Type'],
       maxAge: 86_400,
     });

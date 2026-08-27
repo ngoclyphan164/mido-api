@@ -3,13 +3,18 @@ import { Test } from '@nestjs/testing';
 import type { INestApplication } from '@nestjs/common';
 import request from 'supertest';
 import type { App } from 'supertest/types';
-import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import { ZodValidationPipe } from 'nestjs-zod';
 
 import { AppModule } from '../src/app.module';
 import { SupabaseJwtVerifier } from '../src/auth/supabase-jwt-verifier.service';
+import { SupabaseAdminService } from '../src/auth/supabase-admin.service';
 import { AllExceptionsFilter } from '../src/common/filters/all-exceptions.filter';
 import { FairnessRepository } from '../src/fairness/fairness.repository';
+import { GroupRepository } from '../src/groups/group.repository';
+import { HangoutRepository } from '../src/hangouts/hangout.repository';
+import { LOCATION_SEARCH_PROVIDER } from '../src/places/location-search-provider';
+import { PLACE_PHOTO_PROVIDER } from '../src/places/place-photo-provider';
 import { PLACES_PROVIDER } from '../src/places/places-provider';
 import { ROUTING_PROVIDER } from '../src/routing/routing-provider';
 import type { RouteMatrixRequest } from '../src/routing/routing-provider';
@@ -39,6 +44,7 @@ const e2eParticipants = [
     fairnessDebtSeconds: 0,
   },
 ];
+const deleteUser = vi.fn().mockResolvedValue(undefined);
 
 describe('mido-api (e2e)', () => {
   let app: INestApplication<App>;
@@ -53,6 +59,8 @@ describe('mido-api (e2e)', () => {
           assuranceLevel: 'aal1',
         }),
       })
+      .overrideProvider(SupabaseAdminService)
+      .useValue({ deleteUser })
       .overrideProvider(SuggestionRepository)
       .useValue({
         loadContext: async () => ({
@@ -75,6 +83,73 @@ describe('mido-api (e2e)', () => {
             ]),
           ),
       })
+      .overrideProvider(GroupRepository)
+      .useValue({
+        update: async (groupId: string, userId: string, name: string) => ({
+          kind: 'ok' as const,
+          group: {
+            id: groupId,
+            name,
+            role: 'owner' as const,
+            memberCount: 2,
+            inviteExpiresAt: new Date('2026-09-01T00:00:00Z'),
+            createdBy: userId,
+            createdAt: new Date('2026-08-20T00:00:00Z'),
+            members: [],
+          },
+        }),
+        remove: async () => ({ kind: 'ok' as const }),
+      })
+      .overrideProvider(HangoutRepository)
+      .useValue({
+        update: async (
+          hangoutId: string,
+          userId: string,
+          input: {
+            activityType?: string;
+            plannedAt?: Date;
+            fairnessMode?: string;
+            budgetMax?: number | null;
+            timeCapSeconds?: number;
+          },
+        ) => ({
+          kind: 'ok' as const,
+          hangout: {
+            id: hangoutId,
+            groupId: e2eGroupId,
+            groupName: 'Nhóm E2E',
+            role: 'owner' as const,
+            activityType: input.activityType ?? 'cafe',
+            plannedAt: input.plannedAt ?? new Date('2026-08-25T11:00:00Z'),
+            fairnessMode: input.fairnessMode ?? 'balanced',
+            budgetMax: input.budgetMax ?? null,
+            timeCapSeconds: input.timeCapSeconds ?? 1_800,
+            status: 'draft' as const,
+            createdBy: userId,
+            createdAt: new Date('2026-08-20T00:00:00Z'),
+            participants: [],
+            pendingMembers: [],
+            outing: null,
+          },
+        }),
+        remove: async () => ({ kind: 'ok' as const }),
+      })
+      .overrideProvider(LOCATION_SEARCH_PROVIDER)
+      .useValue({
+        searchText: async () => ({
+          places: [
+            {
+              provider: 'google_maps',
+              externalId: 'e2e-landmark',
+              name: 'Landmark 81',
+              address: '720A Điện Biên Phủ, Bình Thạnh, Thành phố Hồ Chí Minh',
+              location: { lat: 10.7949, lng: 106.7219 },
+              primaryType: 'shopping_mall',
+              types: ['shopping_mall'],
+            },
+          ],
+        }),
+      })
       .overrideProvider(PLACES_PROVIDER)
       .useValue({
         searchNearby: async () => ({
@@ -91,9 +166,14 @@ describe('mido-api (e2e)', () => {
               types: ['cafe'],
               rating: 4.5,
               userRatingCount: 100,
+              photos: [{ name: 'places/e2e-cafe/photos/e2e-photo' }],
             },
           ],
         }),
+      })
+      .overrideProvider(PLACE_PHOTO_PROVIDER)
+      .useValue({
+        resolvePhotoUri: async () => 'https://lh3.googleusercontent.com/e2e-cafe=s800',
       })
       .overrideProvider(ROUTING_PROVIDER)
       .useValue({
@@ -224,6 +304,15 @@ describe('mido-api (e2e)', () => {
     });
   });
 
+  it('DELETE /v1/auth/me xóa cả anonymous account và trả 204', async () => {
+    await request(app.getHttpServer())
+      .delete('/v1/auth/me')
+      .set('Authorization', 'Bearer fixture.jwt')
+      .expect(204);
+
+    expect(deleteUser).toHaveBeenCalledWith('3f8f2c43-b10d-4cd0-92d8-cc40ef58a0e8');
+  });
+
   it('POST /v1/midpoint/preview validate bằng Zod và không gọi API ngoài', async () => {
     const res = await request(app.getHttpServer())
       .post('/v1/midpoint/preview')
@@ -250,6 +339,96 @@ describe('mido-api (e2e)', () => {
       .expect(400);
   });
 
+  it('GET /v1/places/search trả địa điểm kèm tọa độ để client đặt pin', async () => {
+    const res = await request(app.getHttpServer())
+      .get('/v1/places/search')
+      .query({ q: 'Landmark 81', lat: 10.7769, lng: 106.7009, limit: 5 })
+      .set('Authorization', 'Bearer fixture.jwt')
+      .expect(200);
+
+    expect(res.body).toMatchObject({
+      attribution: 'Powered by Google',
+      places: [
+        {
+          provider: 'google_maps',
+          placeId: 'e2e-landmark',
+          name: 'Landmark 81',
+          location: { lat: 10.7949, lng: 106.7219 },
+          // Client render tag từ đây, không phải từ `types` dạng key của Google.
+          primaryTypeLabel: 'Trung tâm thương mại',
+          typeLabels: ['Trung tâm thương mại'],
+        },
+      ],
+    });
+  });
+
+  it('GET /v1/places/search validate query và bắt lat/lng đi cùng nhau', async () => {
+    await request(app.getHttpServer())
+      .get('/v1/places/search')
+      .query({ q: 'x' })
+      .set('Authorization', 'Bearer fixture.jwt')
+      .expect(400);
+
+    await request(app.getHttpServer())
+      .get('/v1/places/search')
+      .query({ q: 'Landmark 81', lat: 10.7769 })
+      .set('Authorization', 'Bearer fixture.jwt')
+      .expect(400);
+  });
+
+  it('PATCH và DELETE /v1/groups/:id sửa/xóa nhóm', async () => {
+    const updated = await request(app.getHttpServer())
+      .patch(`/v1/groups/${e2eGroupId}`)
+      .set('Authorization', 'Bearer fixture.jwt')
+      .send({ name: 'Nhóm cuối tuần' })
+      .expect(200);
+
+    expect(updated.body).toMatchObject({ id: e2eGroupId, name: 'Nhóm cuối tuần', role: 'owner' });
+
+    await request(app.getHttpServer())
+      .delete(`/v1/groups/${e2eGroupId}`)
+      .set('Authorization', 'Bearer fixture.jwt')
+      .expect(204);
+  });
+
+  it('PATCH và DELETE /v1/hangouts/:id sửa/xóa kèo', async () => {
+    const updated = await request(app.getHttpServer())
+      .patch(`/v1/hangouts/${e2eHangoutId}`)
+      .set('Authorization', 'Bearer fixture.jwt')
+      .send({
+        activityType: 'ăn',
+        plannedAt: '2026-08-26T19:00:00+07:00',
+        budgetMax: null,
+      })
+      .expect(200);
+
+    expect(updated.body).toMatchObject({
+      id: e2eHangoutId,
+      activityType: 'ăn',
+      budgetMax: null,
+    });
+    expect(updated.body.plannedAt).toBe('2026-08-26T12:00:00.000Z');
+
+    await request(app.getHttpServer())
+      .delete(`/v1/hangouts/${e2eHangoutId}`)
+      .set('Authorization', 'Bearer fixture.jwt')
+      .expect(204);
+  });
+
+  it('PATCH update từ chối body rỗng bằng Zod', async () => {
+    await request(app.getHttpServer())
+      .patch(`/v1/hangouts/${e2eHangoutId}`)
+      .set('Authorization', 'Bearer fixture.jwt')
+      .send({})
+      .expect(400);
+
+    await request(app.getHttpServer())
+      .patch(`/v1/groups/${e2eGroupId}`)
+      .set('Authorization', 'Bearer fixture.jwt')
+      .send({})
+      .expect(400);
+  });
+
   it('POST /v1/hangouts/:id/suggest trả đủ travelTimes cho mỗi candidate', async () => {
     const res = await request(app.getHttpServer())
       .post(`/v1/hangouts/${e2eHangoutId}/suggest`)
@@ -260,6 +439,10 @@ describe('mido-api (e2e)', () => {
     expect(res.body).toMatchObject({ status: 'ok', hangoutId: e2eHangoutId });
     expect(res.body.suggestions).toHaveLength(1);
     expect(res.body.suggestions[0].suggestionId).toBe('d89fbb8c-50fd-4d9e-9f18-a046f3709ab1');
+    expect(res.body.suggestions[0].typeLabels).toEqual(['Quán cà phê']);
+    expect(res.body.suggestions[0].images).toEqual([
+      'https://lh3.googleusercontent.com/e2e-cafe=s800',
+    ]);
     expect(res.body.suggestions[0].travelTimes).toHaveLength(2);
     expect(res.body.suggestions[0].travelTimes).toEqual(
       expect.arrayContaining([
@@ -275,6 +458,20 @@ describe('mido-api (e2e)', () => {
       .post('/v1/hangouts/not-a-uuid/suggest')
       .set('Authorization', 'Bearer fixture.jwt')
       .send({})
+      .expect(400);
+  });
+
+  it('POST /v1/hangouts/:id/suggest nhận topN tới 20 để client xin nguyên pool', async () => {
+    await request(app.getHttpServer())
+      .post(`/v1/hangouts/${e2eHangoutId}/suggest`)
+      .set('Authorization', 'Bearer fixture.jwt')
+      .send({ topN: 20 })
+      .expect(200);
+
+    await request(app.getHttpServer())
+      .post(`/v1/hangouts/${e2eHangoutId}/suggest`)
+      .set('Authorization', 'Bearer fixture.jwt')
+      .send({ topN: 21 })
       .expect(400);
   });
 

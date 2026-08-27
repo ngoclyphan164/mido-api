@@ -1,10 +1,16 @@
 import { describe, expect, it, vi } from 'vitest';
 
 import { haversineMeters } from '../midpoint/geometry';
+import type { PlacePhotoProvider } from '../places/place-photo-provider';
 import type { PlacesProvider } from '../places/places-provider';
 import type { RoutingProvider } from '../routing/routing-provider';
 import type { HangoutSuggestionContext, SuggestionRepository } from './suggestion.repository';
+import type { SuggestionSnapshotRepository } from './suggestion-snapshot.repository';
 import { SuggestionService } from './suggestion.service';
+
+function createPhotoProvider(uri?: string): PlacePhotoProvider {
+  return { resolvePhotoUri: vi.fn().mockResolvedValue(uri) };
+}
 
 const context: HangoutSuggestionContext = {
   id: '68f9bef5-a143-45a5-bab3-4f54e3a216f6',
@@ -54,6 +60,11 @@ function createRepository(currentContext: HangoutSuggestionContext | undefined =
   };
 }
 
+/** `/suggest` ghi snapshot sau khi build response; các test dưới đây chỉ quan tâm response. */
+function snapshotStub() {
+  return { saveMany: vi.fn() } as unknown as SuggestionSnapshotRepository;
+}
+
 describe('SuggestionService', () => {
   it('trả travelTimes đầy đủ, bỏ candidate thiếu route và relax cap khi cần', async () => {
     const repository = createRepository();
@@ -72,6 +83,8 @@ describe('SuggestionService', () => {
             types: ['cafe'],
             rating: 4.6,
             userRatingCount: 200,
+            photos: [{ name: 'places/cafe-complete/photos/fixture' }],
+            mapsUri: 'https://maps.google.com/?cid=cafe-complete',
           },
           {
             provider: 'google_maps',
@@ -115,10 +128,15 @@ describe('SuggestionService', () => {
         ],
       }),
     };
+    const resolvePhotoUri = vi
+      .fn<PlacePhotoProvider['resolvePhotoUri']>()
+      .mockResolvedValue('https://lh3.googleusercontent.com/cafe=s800');
     const service = new SuggestionService(
       repository as unknown as SuggestionRepository,
       placesProvider,
       routingProvider,
+      { resolvePhotoUri },
+      snapshotStub(),
     );
 
     const result = await service.suggest(context.id, 'user-id', { topN: 5 });
@@ -132,7 +150,117 @@ describe('SuggestionService', () => {
       'Linh',
     ]);
     expect(result.suggestions[0]?.suggestionId).toBe('suggestion-1');
+    expect(result.suggestions[0]?.mapsUri).toBe('https://maps.google.com/?cid=cafe-complete');
     expect(repository.syncActiveSuggestions).toHaveBeenCalledOnce();
+
+    // Chỉ candidate được trả về client mới tốn call Place Photo, candidate bị
+    // loại vì thiếu route thì không.
+    expect(result.suggestions[0]?.images).toEqual(['https://lh3.googleusercontent.com/cafe=s800']);
+    expect(resolvePhotoUri).toHaveBeenCalledOnce();
+    expect(resolvePhotoUri).toHaveBeenCalledWith({ name: 'places/cafe-complete/photos/fixture' });
+  });
+
+  it('trả nguyên pool khi topN bằng số candidate, để client tự xoay vòng "suggest lại"', async () => {
+    // `/suggest` deterministic, gọi lại chỉ tốn tiền Google mà ra y hệt kết quả.
+    // Route Matrix đã tính cho cả pool rồi nên trả hết ra là gần như miễn phí.
+    const poolSize = 12;
+    const places = Array.from({ length: poolSize }, (_, index) => ({
+      provider: 'google_maps',
+      externalId: `cafe-${index}`,
+      name: `Cafe ${index}`,
+      location: { lat: 10.78 + index * 0.001, lng: 106.695 },
+      primaryType: 'cafe',
+      types: ['cafe'],
+      rating: 4 + (index % 5) / 10,
+      userRatingCount: 100 + index,
+      photos: [{ name: `places/cafe-${index}/photos/fixture` }],
+    }));
+    const repository = createRepository();
+    const searchNearby = vi.fn<PlacesProvider['searchNearby']>().mockResolvedValue({
+      snappedCenter: { lat: 10.78, lng: 106.69 },
+      searchCell: '250:fixture',
+      storagePolicy: { identityMayBeStored: true, contentMayBeStored: false },
+      places,
+    });
+    const computeRouteMatrix = vi.fn<RoutingProvider['computeRouteMatrix']>().mockResolvedValue({
+      storagePolicy: { contentMayBeStored: false },
+      elements: context.participants.flatMap((participant) =>
+        places.map((place, index) => ({
+          originId: participant.id,
+          destinationId: `google_maps:${place.externalId}`,
+          mode: participant.mode,
+          status: 'ok' as const,
+          durationSec: 400 + index * 5,
+        })),
+      ),
+    });
+    const resolvePhotoUri = vi
+      .fn<PlacePhotoProvider['resolvePhotoUri']>()
+      .mockImplementation((photo) =>
+        Promise.resolve(`https://lh3.googleusercontent.com/${photo.name}`),
+      );
+    const service = new SuggestionService(
+      repository as unknown as SuggestionRepository,
+      { searchNearby },
+      { computeRouteMatrix },
+      { resolvePhotoUri },
+      snapshotStub(),
+    );
+
+    const result = await service.suggest(context.id, 'user-id', { topN: poolSize });
+
+    expect(result.suggestions).toHaveLength(poolSize);
+    expect(new Set(result.suggestions.map((suggestion) => suggestion.id)).size).toBe(poolSize);
+    expect(result.suggestions.every((suggestion) => suggestion.images.length === 1)).toBe(true);
+    // Một lần /suggest, một call Place Photo cho mỗi option trả về.
+    expect(resolvePhotoUri).toHaveBeenCalledTimes(poolSize);
+    expect(searchNearby).toHaveBeenCalledOnce();
+    expect(computeRouteMatrix).toHaveBeenCalledOnce();
+  });
+
+  it('vẫn trả suggestion khi Place Photo không lấy được ảnh', async () => {
+    const repository = createRepository();
+    const placesProvider: PlacesProvider = {
+      searchNearby: vi.fn().mockResolvedValue({
+        snappedCenter: { lat: 10.78, lng: 106.69 },
+        searchCell: '250:fixture',
+        storagePolicy: { identityMayBeStored: true, contentMayBeStored: false },
+        places: [
+          {
+            provider: 'google_maps',
+            externalId: 'cafe-1',
+            name: 'Cafe 1',
+            location: { lat: 10.78, lng: 106.695 },
+            types: ['cafe'],
+            photos: [{ name: 'places/cafe-1/photos/fixture' }],
+          },
+        ],
+      }),
+    };
+    const routingProvider: RoutingProvider = {
+      computeRouteMatrix: vi.fn().mockResolvedValue({
+        storagePolicy: { contentMayBeStored: false },
+        elements: context.participants.map((participant) => ({
+          originId: participant.id,
+          destinationId: 'google_maps:cafe-1',
+          mode: participant.mode,
+          status: 'ok',
+          durationSec: 500,
+        })),
+      }),
+    };
+    const service = new SuggestionService(
+      repository as unknown as SuggestionRepository,
+      placesProvider,
+      routingProvider,
+      createPhotoProvider(undefined),
+      snapshotStub(),
+    );
+
+    const result = await service.suggest(context.id, 'user-id', { topN: 5 });
+
+    expect(result.suggestions).toHaveLength(1);
+    expect(result.suggestions[0]?.images).toEqual([]);
   });
 
   it('không gọi provider tính phí khi nhóm quá phân tán', async () => {
@@ -162,6 +290,8 @@ describe('SuggestionService', () => {
       repository as unknown as SuggestionRepository,
       placesProvider,
       routingProvider,
+      createPhotoProvider(),
+      snapshotStub(),
     );
 
     const result = await service.suggest(context.id, 'user-id', { topN: 5 });
@@ -191,6 +321,8 @@ describe('SuggestionService', () => {
       repository as unknown as SuggestionRepository,
       { searchNearby },
       { computeRouteMatrix: vi.fn() },
+      createPhotoProvider(),
+      snapshotStub(),
     );
 
     const result = await service.suggest(context.id, 'user-id', { topN: 5 });

@@ -20,6 +20,30 @@ export class GroupService {
     return group;
   }
 
+  async update(groupId: string, userId: string, name: string) {
+    const result = await this.repository.update(groupId, userId, name);
+    switch (result.kind) {
+      case 'ok':
+        return result.group;
+      case 'forbidden':
+        throw new ForbiddenException('Chỉ owner hoặc admin mới được sửa nhóm');
+      case 'not_found':
+        throw new NotFoundException('Không tìm thấy nhóm hoặc bạn không thuộc nhóm này');
+    }
+  }
+
+  async remove(groupId: string, userId: string): Promise<void> {
+    const result = await this.repository.remove(groupId, userId);
+    switch (result.kind) {
+      case 'ok':
+        return;
+      case 'forbidden':
+        throw new ForbiddenException('Chỉ owner mới được xóa nhóm');
+      case 'not_found':
+        throw new NotFoundException('Không tìm thấy nhóm hoặc bạn không thuộc nhóm này');
+    }
+  }
+
   async join(userId: string, inviteCode: string) {
     const result = await this.repository.joinByInviteCode(userId, inviteCode);
     switch (result.kind) {

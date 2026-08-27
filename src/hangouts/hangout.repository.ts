@@ -1,5 +1,5 @@
 import { Injectable } from '@nestjs/common';
-import { and, desc, eq, sql } from 'drizzle-orm';
+import { and, desc, eq, inArray, sql } from 'drizzle-orm';
 
 import { toGeographyPoint } from '../database/geography';
 import { DatabaseService } from '../database/database.service';
@@ -25,9 +25,18 @@ export type CreateHangoutInput = {
   idempotencyKey: string;
 };
 
+export type UpdateHangoutInput = {
+  activityType?: string;
+  plannedAt?: Date;
+  fairnessMode?: FairnessMode;
+  budgetMax?: number | null;
+  timeCapSeconds?: number;
+};
+
 export type UpsertParticipantInput = {
   lat: number;
   lng: number;
+  originAddress?: string;
   travelMode: TravelMode;
   displayName?: string;
   weight?: number;
@@ -39,6 +48,7 @@ export type ParticipantView = {
   userId: string;
   displayName: string;
   origin: { lat: number; lng: number };
+  originAddress?: string;
   travelMode: TravelMode;
   weight: number;
   isFlexible: boolean;
@@ -67,10 +77,26 @@ export type HangoutDetailView = Omit<HangoutSummaryView, 'participantCount'> & {
   outing: {
     id: string;
     chosenSuggestionId: string | null;
-    decidedBy: string;
+    decidedBy: string | null;
     decidedAt: Date;
     happenedAt: Date | null;
   } | null;
+};
+
+export type UpdateHangoutResult =
+  | { kind: 'ok'; hangout: HangoutDetailView }
+  | { kind: 'not_found' | 'forbidden' }
+  | { kind: 'immutable'; status: HangoutStatus };
+
+export type DeleteHangoutResult =
+  | { kind: 'ok' }
+  | { kind: 'not_found' | 'forbidden' }
+  | { kind: 'immutable'; status: HangoutStatus };
+
+type HangoutManagementAccess = {
+  createdBy: string;
+  role: 'owner' | 'admin' | 'member';
+  status: HangoutStatus;
 };
 
 const originLat = sql<number>`extensions.ST_Y(${participants.origin}::extensions.geometry)::double precision`;
@@ -133,13 +159,15 @@ export class HangoutRepository {
         status: hangouts.status,
         createdBy: hangouts.createdBy,
         createdAt: hangouts.createdAt,
-        participantCount: sql<number>`(
-          select count(*)::int from ${participants} as counted
-          where counted.hangout_id = ${hangouts.id}
-        )`,
+        // A join rather than a correlated subquery: Drizzle renders
+        // `hangouts.id` unqualified inside raw sql, so `counted.hangout_id =
+        // id` resolved against participants.id and always counted zero.
+        participantCount: sql<number>`count(${participants.id})::int`,
       })
       .from(hangouts)
+      .leftJoin(participants, eq(participants.hangoutId, hangouts.id))
       .where(eq(hangouts.groupId, groupId))
+      .groupBy(hangouts.id)
       .orderBy(desc(hangouts.plannedAt), desc(hangouts.createdAt));
 
     return rows.map((row) => ({ ...row, participantCount: Number(row.participantCount) }));
@@ -178,6 +206,7 @@ export class HangoutRepository {
         id: participants.id,
         userId: participants.userId,
         displayName: participants.displayName,
+        originAddress: participants.originAddress,
         travelMode: participants.travelMode,
         weight: participants.weight,
         isFlexible: participants.isFlexible,
@@ -216,6 +245,7 @@ export class HangoutRepository {
         userId: row.userId,
         displayName: row.displayName,
         origin: { lat: Number(row.lat), lng: Number(row.lng) },
+        originAddress: row.originAddress ?? undefined,
         travelMode: row.travelMode,
         weight: Number(row.weight),
         isFlexible: row.isFlexible,
@@ -223,6 +253,60 @@ export class HangoutRepository {
       pendingMembers: memberRows.filter((member) => !joinedUserIds.has(member.userId)),
       outing: outing ?? null,
     };
+  }
+
+  async update(
+    hangoutId: string,
+    userId: string,
+    input: UpdateHangoutInput,
+  ): Promise<UpdateHangoutResult> {
+    const access = await this.findManagementAccess(hangoutId, userId);
+    if (!access) return { kind: 'not_found' };
+    if (!this.canManage(access, userId)) return { kind: 'forbidden' };
+    if (access.status !== 'draft' && access.status !== 'voting') {
+      return { kind: 'immutable', status: access.status };
+    }
+
+    const [updated] = await this.database.db
+      .update(hangouts)
+      .set({
+        ...(input.activityType === undefined ? null : { activityType: input.activityType }),
+        ...(input.plannedAt === undefined ? null : { plannedAt: input.plannedAt }),
+        ...(input.fairnessMode === undefined ? null : { fairnessMode: input.fairnessMode }),
+        ...(input.budgetMax === undefined ? null : { budgetMax: input.budgetMax }),
+        ...(input.timeCapSeconds === undefined ? null : { timeCapSeconds: input.timeCapSeconds }),
+        updatedAt: new Date(),
+      })
+      .where(and(eq(hangouts.id, hangoutId), inArray(hangouts.status, ['draft', 'voting'])))
+      .returning({ id: hangouts.id });
+    if (!updated) {
+      const latest = await this.findManagementAccess(hangoutId, userId);
+      return latest ? { kind: 'immutable', status: latest.status } : { kind: 'not_found' };
+    }
+
+    const hangout = await this.findDetail(hangoutId, userId);
+    if (!hangout) return { kind: 'not_found' };
+    return { kind: 'ok', hangout };
+  }
+
+  async remove(hangoutId: string, userId: string): Promise<DeleteHangoutResult> {
+    const access = await this.findManagementAccess(hangoutId, userId);
+    if (!access) return { kind: 'not_found' };
+    if (!this.canManage(access, userId)) return { kind: 'forbidden' };
+    if (access.status === 'decided' || access.status === 'done') {
+      return { kind: 'immutable', status: access.status };
+    }
+
+    const [deleted] = await this.database.db
+      .delete(hangouts)
+      .where(
+        and(eq(hangouts.id, hangoutId), inArray(hangouts.status, ['draft', 'voting', 'cancelled'])),
+      )
+      .returning({ id: hangouts.id });
+    if (deleted) return { kind: 'ok' };
+
+    const latest = await this.findManagementAccess(hangoutId, userId);
+    return latest ? { kind: 'immutable', status: latest.status } : { kind: 'not_found' };
   }
 
   /**
@@ -254,6 +338,7 @@ export class HangoutRepository {
         userId,
         displayName,
         origin,
+        originAddress: input.originAddress ?? null,
         travelMode: input.travelMode,
         ...(weight === undefined ? null : { weight }),
         ...(input.isFlexible === undefined ? null : { isFlexible: input.isFlexible }),
@@ -263,6 +348,8 @@ export class HangoutRepository {
         set: {
           displayName,
           origin,
+          // Never retain an address that belonged to the previous coordinate.
+          originAddress: input.originAddress ?? null,
           travelMode: input.travelMode,
           ...(weight === undefined ? null : { weight }),
           ...(input.isFlexible === undefined ? null : { isFlexible: input.isFlexible }),
@@ -275,6 +362,7 @@ export class HangoutRepository {
         id: participants.id,
         userId: participants.userId,
         displayName: participants.displayName,
+        originAddress: participants.originAddress,
         travelMode: participants.travelMode,
         weight: participants.weight,
         isFlexible: participants.isFlexible,
@@ -292,9 +380,34 @@ export class HangoutRepository {
       userId: row.userId,
       displayName: row.displayName,
       origin: { lat: Number(row.lat), lng: Number(row.lng) },
+      originAddress: row.originAddress ?? undefined,
       travelMode: row.travelMode,
       weight: Number(row.weight),
       isFlexible: row.isFlexible,
     };
+  }
+
+  private async findManagementAccess(
+    hangoutId: string,
+    userId: string,
+  ): Promise<HangoutManagementAccess | undefined> {
+    const [access] = await this.database.db
+      .select({
+        createdBy: hangouts.createdBy,
+        role: groupMembers.role,
+        status: hangouts.status,
+      })
+      .from(hangouts)
+      .innerJoin(
+        groupMembers,
+        and(eq(groupMembers.groupId, hangouts.groupId), eq(groupMembers.userId, userId)),
+      )
+      .where(eq(hangouts.id, hangoutId))
+      .limit(1);
+    return access;
+  }
+
+  private canManage(access: HangoutManagementAccess, userId: string): boolean {
+    return access.createdBy === userId || access.role === 'owner' || access.role === 'admin';
   }
 }

@@ -71,9 +71,9 @@ src/
 ├── database/        # Drizzle + postgres.js; schema Phase 1
 ├── fairness/        # decide/complete outing, fairness ledger và priority weight thuần
 ├── midpoint/        # geometry/scoring thuần + POST /v1/midpoint/preview
-├── places/          # PlacesProvider + Google Nearby Search (New)
-├── providers/       # Google HTTP client, grid 250m và policy dùng chung
-├── routing/         # RoutingProvider + Google Compute Route Matrix
+├── places/          # Google Nearby/Text Search/Place Photo + bảng dịch place type
+├── providers/       # HTTP clients, grid 250m và policy dùng chung
+├── routing/         # Google Route Matrix provider
 ├── suggestions/     # /suggest pipeline, activity/filtering và DB repository
 ├── votes/           # upsert vote API + tally; realtime đọc từ Supabase
 └── health/
@@ -81,32 +81,116 @@ src/
 
 ## Places và Routes providers
 
-`PlacesProvider` và `RoutingProvider` là interface/token DI, hiện được implement bằng Google Maps.
-Nearby Search luôn snap tâm vào grid Web Mercator 250m, giới hạn tối đa 20 kết quả và gửi field mask
-chính xác thay vì wildcard. Route Matrix tự group participant theo travel mode vì Google chỉ nhận một
-`travelMode` cho mỗi request; batch transit được tự chia để không vượt 100 elements.
+Toàn bộ chức năng bản đồ chạy trên Google Maps Platform, không còn provider thứ hai để chuyển qua
+lại:
+
+| Chức năng            | API                                | Dùng ở đâu                    |
+| -------------------- | ---------------------------------- | ----------------------------- |
+| Tìm địa điểm quanh midpoint | Places API (New) Nearby Search | `POST /v1/hangouts/:id/suggest` |
+| Tìm vị trí theo tên  | Places API (New) Text Search       | `GET /v1/places/search`       |
+| Ảnh địa điểm         | Places API (New) Place Photo       | `images` trong `/suggest`     |
+| Thời gian di chuyển  | Routes API `computeRouteMatrix`    | `POST /v1/hangouts/:id/suggest` |
+
+Nearby Search tìm tối đa 20 địa điểm với tâm đã snap vào grid Web Mercator 250m. Route Matrix group
+participant theo travel mode, dùng traffic-aware cho ô tô/xe máy và tự chia batch transit để không
+vượt 100 elements.
 
 Provider có timeout, circuit breaker và budget theo ngày trên từng process. Budget trong app chỉ là
-hàng rào best-effort vì Vercel có thể scale nhiều instance; quota cứng và billing alert vẫn phải đặt
-trong Google Cloud Console.
+hàng rào best-effort vì Vercel có thể scale nhiều instance; quota cứng/billing alert vẫn phải đặt ở
+Google Cloud Console.
 
 Policy lưu trữ được encode cả trong provider lẫn database:
 
-- `provider_place_refs` chỉ lưu provider + external place ID; Google place ID được phép lưu dài hạn.
+- `provider_place_refs` chỉ lưu provider + external place ID.
 - `place_content_cache` và `route_matrix_cache` dành cho provider có license cho phép cache content.
-- Constraint DB từ chối `google_maps` trong hai bảng content cache, tránh vô tình lưu name/rating,
-  opening hours hay route duration của Google.
+- Constraint DB từ chối `google_maps` trong hai bảng content cache, tránh vô tình lưu content bị
+  giới hạn bởi điều khoản Google. Với setup hiện tại hai bảng này luôn rỗng.
 - `GET /v1/cron/prune-cache` xóa các record cache đã hết hạn.
+- **Ngoại lệ có chủ đích: `suggestion_places`.** Xem "Snapshot gợi ý" bên dưới.
 
-Test provider đọc fixture trong `test/fixtures/google/`; không gọi Google API thật.
+Test provider đọc fixture trong `test/fixtures/google/`; không gọi API Google thật.
+
+Client tìm vị trí xuất phát theo tên hoặc địa chỉ qua endpoint private:
+
+```http
+GET /v1/places/search?q=Landmark%2081&lat=10.7769&lng=106.7009&radiusMeters=20000&limit=5
+Authorization: Bearer <supabase-access-token>
+```
+
+`lat` và `lng` là location bias tùy chọn (phải gửi cùng nhau), `radiusMeters` mặc định 50 km và
+`limit` mặc định 5, tối đa 10. Bias chứ không phải restriction: gõ tên quán ở tỉnh khác vẫn ra kết
+quả, chỉ bị xếp sau. Backend chuẩn hóa response thành `provider: "google_maps"`, `placeId`, tên, địa
+chỉ và `location { lat, lng }` để client đặt pin ngay, kèm `attribution: "Powered by Google"` —
+điều khoản Google Maps Platform bắt buộc render chuỗi này.
+
+### Place type hiển thị
+
+Google trả place type dạng key (`coffee_shop`, `shopping_mall`, `point_of_interest`). Cả
+`/v1/places/search` lẫn `/suggest` trả thêm `typeLabels` và `primaryTypeLabel` đã dịch sang tiếng
+Việt, `primaryType` đứng đầu danh sách:
+
+```json
+{
+  "primaryType": "cafe",
+  "types": ["cafe", "coffee_shop", "food", "point_of_interest"],
+  "primaryTypeLabel": "Quán cà phê",
+  "typeLabels": ["Quán cà phê"]
+}
+```
+
+Bảng dịch nằm ở `src/places/place-types.ts`. Type chung chung (`point_of_interest`, `establishment`,
+`food`) và nhãn hành chính của Geocoding bị loại hẳn; type Google mới thêm mà bảng chưa có thì được
+viết hoa lại (`pickleball_court` → `Pickleball court`) để UI không bao giờ lòi snake_case. Trường
+`types` gốc vẫn giữ nguyên cho client nào cần lọc theo key.
+
+## Sửa và xóa nhóm/kèo
+
+Các route đều private và cần Supabase access token:
+
+```http
+PATCH /v1/groups/:groupId
+{ "name": "Nhóm cuối tuần" }
+
+DELETE /v1/groups/:groupId
+
+PATCH /v1/hangouts/:hangoutId
+{
+  "activityType": "ăn",
+  "plannedAt": "2026-08-26T19:00:00+07:00",
+  "fairnessMode": "balanced",
+  "budgetMax": null,
+  "timeCapSeconds": 1800
+}
+
+DELETE /v1/hangouts/:hangoutId
+```
+
+Owner/admin được đổi tên nhóm; chỉ owner được xóa nhóm. Xóa nhóm là HTTP 204 và cascade toàn bộ
+membership, kèo, vote, outing và fairness ledger thuộc nhóm trong cùng câu lệnh database. Với kèo,
+creator hoặc owner/admin được quản lý. Chỉ kèo `draft`/`voting` được sửa; kèo `decided`/`done` trả
+409 khi sửa hoặc xóa để không làm mất lịch sử outing/fairness. Gửi `budgetMax: null` để bỏ giới hạn
+ngân sách. DELETE thành công trả HTTP 204.
+
+## Xóa tài khoản
+
+`DELETE /v1/auth/me` xóa vĩnh viễn Supabase Auth user hiện tại. Foreign key cascade đồng thời xóa
+profile, nhóm/kèo do người đó tạo, membership, vị trí, participant, vote và fairness ledger liên
+quan. Outing chung vẫn được giữ nhưng `decided_by` được đặt `NULL` để không còn liên kết nhận dạng.
+Route chấp nhận cả tài khoản email và anonymous account, trả HTTP 204 khi hoàn tất.
+
+Backend gọi Supabase Admin API bằng `DATABASE_SUPABASE_SERVICE_ROLE_KEY`; đây là secret server-only,
+không được đưa vào app Expo hoặc bất kỳ biến `EXPO_PUBLIC_*` nào.
 
 ## Suggest pipeline
 
 `POST /v1/hangouts/:id/suggest` chỉ cho member của group và nhận body tùy chọn:
 
 ```json
-{ "topN": 5, "minimumRating": 4 }
+{ "topN": 20, "minimumRating": 4 }
 ```
+
+`topN` mặc định 5, tối đa 20 — đúng bằng số candidate mà pipeline đã gọi Route Matrix (và trả tiền)
+cho.
 
 Pipeline đọc hangout + participant từ Postgres, tính geometric median, tìm tối đa 20 Places,
 lọc business status/opening hours/budget/rating, gọi Route Matrix rồi chấm điểm theo fairness mode.
@@ -116,12 +200,25 @@ Mỗi suggestion luôn có:
 {
   "id": "provider-place-id",
   "suggestionId": "stable-option-uuid",
+  "provider": "google_maps",
+  "primaryTypeLabel": "Quán cà phê",
+  "typeLabels": ["Quán cà phê"],
+  "images": ["https://lh3.googleusercontent.com/..."],
+  "mapsUri": "https://maps.google.com/?cid=...",
   "score": 0.82,
   "travelTimes": [
     { "participantId": "...", "name": "Nam", "durationSec": 720, "mode": "two_wheeler" }
   ]
 }
 ```
+
+`images` có tối đa 1 URL mỗi địa điểm. Nearby Search chỉ trả photo reference, nên backend gọi thêm
+Place Photo với `skipHttpRedirect=true` để lấy `photoUri` đã ký — API key không bao giờ đi ra client.
+Photo chỉ được resolve cho đúng các option trả về (`topN`), không phải cả 20 candidate; đổi lại mỗi
+lần `/suggest` tốn thêm tối đa `topN` request Place Photo, budget đặt ở
+`GOOGLE_PLACE_PHOTO_DAILY_REQUEST_LIMIT`. Nếu Place Photo lỗi hoặc địa điểm không có ảnh thì API trả
+`images: []` chứ không fail cả request. Backend chỉ chuyển tiếp URL, không tải hay cache file ảnh —
+`photoUri` của Google có hạn sử dụng nên client không được lưu lại.
 
 Candidate thiếu route của bất kỳ participant nào sẽ bị loại. Time cap là veto cứng; nếu veto loại
 hết thì response đặt `meta.capRelaxed = true`. Nhóm phân tán trên 25 km trả
@@ -131,9 +228,26 @@ Activity hiện hỗ trợ `food`/`ăn`, `cafe`/`cà phê`, `drinks`/`nhậu`, `
 và `bowling`. `budgetMax` đang được hiểu là VND/người và quy đổi sang price level bằng heuristic
 MVP; cần thay bằng preference rõ ràng từ client nếu muốn chính xác hơn.
 
-Response hiện được tính và trả trực tiếp, không persist Google place content hay route duration.
+Response hiện được tính và trả trực tiếp, không persist place content hay route duration.
 Vì vậy client không nên tự động retry `POST /suggest`; idempotency bền vững cần được thiết kế cùng
 provider/license cho phép lưu snapshot trước khi bật retry trong production.
+
+### "Suggest lại" phải xoay vòng ở client
+
+`/suggest` là hàm thuần theo participant, `plannedAt`, `fairnessMode`, `budgetMax` và `timeCapSeconds`
+— không có random, không phụ thuộc thời điểm gọi. Gọi lại với cùng input sẽ trả về **đúng danh sách
+cũ**, trong khi vẫn tốn 1 Nearby Search + Route Matrix + `topN` Place Photo. Đừng map nút "suggest
+lại" thành một request mới.
+
+Cách đúng: xin `topN: 20` một lần, đọc lại qua `GET :id/suggestions`, rồi mỗi lần bấm thì hiện 5
+option kế tiếp và quay vòng khi hết. Cả 20 option đều được persist với `isActive = true` và có
+`suggestionId` riêng, nên vote đặt ở trang nào cũng hợp lệ và không mất khi xoay vòng.
+
+Pool không còn chỉ nằm trong state màn hình: `suggestion_places` giữ nó lại, nên đóng app mở lại
+vẫn xoay vòng được trên đúng 20 quán đó mà không tốn thêm đồng nào.
+
+Chỉ gọi lại API khi input thực sự đổi — thêm/bớt participant, đổi `plannedAt`, `fairnessMode`,
+`budgetMax`, `timeCapSeconds` hoặc `minimumRating`.
 
 ### Vote và Realtime
 
@@ -148,9 +262,58 @@ Content-Type: application/json
 ```
 
 `value` là `up`, `down` hoặc `veto`; response trả vote hiện tại và tally. Database chỉ persist
-provider place ID, rank và trạng thái active, không persist Google content/route duration. Client
+provider place ID, rank và trạng thái active, không persist provider content/route duration. Client
 subscribe `postgres_changes` trên `suggestions` và `votes`; RLS chỉ cho authenticated group member
 nhận event. Role client chỉ có SELECT, mọi thao tác ghi vote phải đi qua Nest API.
+
+### Snapshot gợi ý
+
+`suggestions` chỉ lưu place ID, rank và `is_active` — nên trước đây tên quán, ảnh, rating và thời
+gian di chuyển của từng người chỉ tồn tại trong response `/suggest` và biến mất khi client đóng app.
+Hai hệ quả: kèo đã chốt mở lại không còn thấy quán, và mở lại màn gợi ý là bắn một `/suggest` mới —
+Places + Route Matrix cho tới 20 quán, mỗi người trong nhóm một lần.
+
+`POST /v1/hangouts/:id/suggest` giờ ghi luôn snapshot vào `suggestion_places`, một hàng cho mỗi
+option. Client đọc lại miễn phí:
+
+```http
+GET /v1/hangouts/:hangoutId/suggestions
+Authorization: Bearer <supabase-access-token>
+```
+
+Nhận `offset` và `limit` (mặc định 0 và 5, trần 20), trả `{ suggestions, total, offset }` theo đúng
+rank lúc suggest. Mỗi phần tử có `name`, `address`, `location`, `typeLabels`, `rating`, `images`,
+`travelTimes`, `score`/`scoreBreakdown` và `tally` vote hiện tại. **Client phải gọi endpoint này
+trước**; chỉ khi `total` bằng 0 mới được `POST :id/suggest`, vì đó mới là request tính tiền.
+
+`GET /v1/hangouts/:hangoutId/suggestions/:suggestionId` trả đúng một option, để màn chi tiết không
+phải đoán nó nằm ở trang nào.
+
+Ảnh chỉ resolve cho hàng thực sự trả về, nên xin cả pool 20 thì tốn tối đa 20 request Place Photo —
+`/suggest` đã lưu sẵn URL nó vừa resolve nên lần đọc đầu là miễn phí.
+
+`GET /v1/hangouts/:id` của kèo đã chốt trả thêm `outing.place` với đúng shape đó, đọc qua
+`outings.chosen_suggestion_id`.
+
+Vài điểm cần biết trước khi sửa chỗ này:
+
+- **Bảng này cố ý giữ content vĩnh viễn**, không TTL và không nằm trong `prune-cache`. Chủ sản phẩm
+  chọn như vậy để xem lại lịch sử kèo cũ và để không ai trả tiền `/suggest` hai lần. Hệ quả: cả
+  place content lẫn route duration được giữ quá thời hạn mà điều khoản Google Maps Platform cho
+  phép — đây là quyết định sản phẩm, không phải sơ suất. Muốn quay về đúng điều khoản thì bỏ bảng
+  này và resolve Place Details ngay lúc đọc.
+- **Hàng của option đã chốt không bao giờ bị ghi đè**: `/suggest` bị chặn khi kèo ở trạng thái
+  `decided`/`done`/`cancelled`, nên bấm "tìm lại" không thể làm hỏng bản ghi lịch sử. Đó cũng là lý
+  do outing không cần bảng riêng.
+- **Ảnh lưu resource name, không lưu URL.** `photoUri` của Google hết hạn sau ít phút. `photo_uri`
+  chỉ là bản dùng lại trong 5 phút để mở đi mở lại không tốn thêm request Place Photo.
+- Kèo chốt từ trước khi có bảng này được lấp lười: lần đầu ai đó mở chi tiết kèo, API đọc lại nội
+  dung bằng Place Details từ place ID đã lưu rồi ghi vào hàng của option đã chốt. `travelTimes` để
+  rỗng — số phút của lần suggest đó đã mất, không bịa được. Không cần backfill tay.
+- Ghi snapshot là best-effort ở cả hai đường: ghi hỏng thì `/suggest` vẫn trả response bình thường,
+  và đọc hỏng thì trả rỗng để client quay về `/suggest` chứ không 500.
+- Field mask của Place Details quyết định SKU, nên chỉ xin đúng field màn "Đã chốt" render. Không
+  xin `regularOpeningHours`: giờ mở cửa đổi theo thời gian, snapshot chỉ sinh ra thông tin sai.
 
 ### Fairness ledger
 
@@ -190,8 +353,8 @@ npm run db:check
 npm run db:migrate
 ```
 
-Mọi bảng public đều bật RLS. Phần lớn là default-deny; riêng `suggestions`, `votes` và
-`provider_place_refs` có SELECT policy cho authenticated group member để dùng Supabase Realtime.
+Mọi bảng public đều bật RLS. Phần lớn là default-deny; riêng `participants`, `suggestions`, `votes`
+và `provider_place_refs` có SELECT policy cho authenticated group member để dùng Supabase Realtime.
 Nest kết nối bằng database role nên service vẫn phải kiểm tra participant/membership; không được coi
 RLS là thay thế cho authorization của API.
 
@@ -236,6 +399,20 @@ Backend đọc trực tiếp tên biến do Supabase Marketplace custom prefix `
 lớp alias hay tên canonical trung gian. Các publishable/anon/secret/service-role key do integration
 tạo hiện không được backend này sử dụng.
 
+Tất cả chức năng bản đồ đọc chung `GOOGLE_MAPS_API_KEY`. Mỗi API có budget best-effort riêng:
+`GOOGLE_PLACES_DAILY_REQUEST_LIMIT` (Nearby), `GOOGLE_TEXT_SEARCH_DAILY_REQUEST_LIMIT`,
+`GOOGLE_PLACE_PHOTO_DAILY_REQUEST_LIMIT` và `GOOGLE_ROUTES_DAILY_ELEMENT_LIMIT`.
+`GOOGLE_PLACE_PHOTO_MAX_WIDTH_PX` (mặc định 800) quyết định kích thước ảnh xin từ Place Photo.
+
+Nếu Google trả `403 PERMISSION_DENIED`, kiểm tra trong đúng Google Cloud project của API key:
+
+1. **APIs & Services → Enabled APIs** đã bật **Places API (New)** và **Routes API**.
+2. **Credentials → API key → API restrictions** đã cho phép cả hai. Place Photo và Text Search nằm
+   trong Places API (New), không phải API riêng.
+3. Key dùng bởi Nest/Vercel là key riêng cho web service; không gắn restriction kiểu Android, iOS
+   hoặc HTTP referrer. Nếu dùng IP restriction thì IP outbound của môi trường chạy phải nằm trong
+   allowlist.
+
 ## Roadmap
 
 | Phase | Nội dung                                                                            | Trạng thái |
@@ -250,17 +427,22 @@ tạo hiện không được backend này sử dụng.
 
 ## Ghi chú chi phí
 
-Places Nearby Search kèm field `rating` bị tính theo **Enterprise SKU ($35/1000 call, free tier
-chỉ 1.000 call/tháng)**. Kiểm soát chi phí bằng các biện pháp sau:
+Nearby Search kèm field `rating` đã đẩy request vào Enterprise SKU, nên `places.photos` (Pro) không
+làm tăng bậc SKU. Kiểm soát chi phí bằng các biện pháp sau:
 
 - Chỉ request field mask thật sự dùng; các field Atmosphere như parking/vegetarian làm request
   chuyển sang SKU cao hơn.
 - Cắt candidate xuống K ≤ 20 bằng haversine **trước khi** gọi `computeRouteMatrix`.
+- Place Photo là một SKU riêng tính theo từng request. Mỗi `/suggest` tốn tối đa `topN` request, và
+  `topN: 20` là mặc định khuyến nghị cho client — vì vậy `GOOGLE_PLACE_PHOTO_DAILY_REQUEST_LIMIT`
+  mặc định 2000 chứ không phải 500. Hạ `topN` nếu ảnh không đáng tiền.
+- Không map nút "suggest lại" của client thành request mới: kết quả deterministic nên tiền bỏ ra
+  không đổi lấy được thông tin gì.
 - Rate limit, budget/quota alert; không bật client retry cho `/suggest` khi chưa có idempotency bền vững.
 
-Không lưu Places/Routes content ngoài ngoại lệ được điều khoản hiện hành cho phép. Với Google,
-`place_id` có thể lưu lâu dài nhưng không mặc định coi name/rating/opening hours hay route duration
-là cache được 30 ngày. Nếu cần cache để đạt economics mong muốn, phải dùng provider/license cho
-phép. Places/Routes content hiển thị trên bản đồ phải dùng Google Map và có attribution đúng.
+Không lưu Places/Routes content ngoài `suggestion_places` (xem "Snapshot gợi ý"). Với Google, `place_id` có thể lưu lâu dài nhưng không mặc định coi name/rating/opening hours hay route
+duration là cache được 30 ngày. Nếu cần cache để đạt economics mong muốn, phải dùng
+provider/license cho phép. Places/Routes content hiển thị trên bản đồ phải dùng Google Map và có
+attribution đúng.
 
 Trong test dùng fixture đã record, không gọi API thật.

@@ -29,6 +29,55 @@
       "when": 1787554693515,
       "tag": "0003_known_synch",
       "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "7",
+      "when": 1787715835456,
+      "tag": "0004_mute_serpent_society",
+      "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "7",
+      "when": 1787717130212,
+      "tag": "0005_burly_hellion",
+      "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1787717146213,
+      "tag": "0006_clammy_vanisher",
+      "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "7",
+      "when": 1787717964491,
+      "tag": "0007_fixed_lockheed",
+      "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "7",
+      "when": 1787719000000,
+      "tag": "0008_participants_realtime",
+      "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "7",
+      "when": 1787720481597,
+      "tag": "0009_brainy_mojo",
+      "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "7",
+      "when": 1787792432948,
+      "tag": "0010_wonderful_omega_red",
+      "breakpoints": true
     }
   ]
 }

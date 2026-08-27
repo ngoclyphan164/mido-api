@@ -17,7 +17,7 @@ type OutingView = {
   id: string;
   hangoutId: string;
   chosenSuggestionId: string | null;
-  decidedBy: string;
+  decidedBy: string | null;
   decidedAt: Date;
   happenedAt: Date | null;
 };

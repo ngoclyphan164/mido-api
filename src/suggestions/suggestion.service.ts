@@ -5,6 +5,7 @@ import {
   HttpStatus,
   Inject,
   Injectable,
+  Logger,
   NotFoundException,
   ServiceUnavailableException,
   UnprocessableEntityException,
@@ -19,6 +20,9 @@ import { FAIRNESS_DEBT_SCALE_SECONDS, fairnessPriorityWeight } from '../fairness
 import { haversineMeters } from '../midpoint/geometry';
 import { computeMidpointPreview } from '../midpoint/preview';
 import { rankCandidates } from '../midpoint/scoring';
+import type { PlacePhotoProvider } from '../places/place-photo-provider';
+import { PLACE_PHOTO_PROVIDER } from '../places/place-photo-provider';
+import { placeTypeLabels } from '../places/place-types';
 import type { PlaceCandidate, PlacesProvider } from '../places/places-provider';
 import { PLACES_PROVIDER } from '../places/places-provider';
 import { GoogleMapsConfigurationError, GoogleMapsHttpError } from '../providers/google-maps.client';
@@ -29,6 +33,7 @@ import type { EvaluatedPlace } from './place-evaluation';
 import { evaluatePlaces } from './place-evaluation';
 import type { HangoutSuggestionContext, SuggestionParticipant } from './suggestion.repository';
 import { SuggestionRepository } from './suggestion.repository';
+import { SuggestionSnapshotRepository } from './suggestion-snapshot.repository';
 
 type TravelTimeView = {
   participantId: string;
@@ -46,9 +51,15 @@ type SuggestionView = {
   location: PlaceCandidate['location'];
   primaryType?: string;
   types: string[];
+  /** `types` đã dịch sang tiếng Việt để client render tag, `primaryType` đứng đầu. */
+  primaryTypeLabel?: string;
+  typeLabels: string[];
   rating?: number;
   userRatingCount?: number;
   priceLevel?: number;
+  images: string[];
+  mapsUri?: string;
+  /** @deprecated Dùng mapsUri. */
   googleMapsUri?: string;
   availability: EvaluatedPlace['availability'];
   score: number;
@@ -91,10 +102,14 @@ type SuggestOptions = { topN: number; minimumRating?: number };
 
 @Injectable()
 export class SuggestionService {
+  private readonly logger = new Logger(SuggestionService.name);
+
   constructor(
     private readonly repository: SuggestionRepository,
     @Inject(PLACES_PROVIDER) private readonly placesProvider: PlacesProvider,
     @Inject(ROUTING_PROVIDER) private readonly routingProvider: RoutingProvider,
+    @Inject(PLACE_PHOTO_PROVIDER) private readonly photoProvider: PlacePhotoProvider,
+    private readonly snapshots: SuggestionSnapshotRepository,
   ) {}
 
   async suggest(
@@ -170,23 +185,36 @@ export class SuggestionService {
         context.timeCapSeconds,
       );
       const routedByKey = new Map(routed.map((candidate) => [candidate.key, candidate]));
-      const selected = ranked.candidates.slice(0, options.topN);
-      const selectedPlaces = selected.flatMap((scored) => {
+      const selected = ranked.candidates.slice(0, options.topN).flatMap((scored) => {
         const candidate = routedByKey.get(scored.id);
-        return candidate ? [candidate.evaluatedPlace.place] : [];
+        return candidate ? [{ scored, candidate }] : [];
       });
-      const suggestionIds = await this.repository.syncActiveSuggestions(context.id, selectedPlaces);
-      const suggestions = selected.flatMap((scored) => {
-        const candidate = routedByKey.get(scored.id);
+      const suggestionIds = await this.repository.syncActiveSuggestions(
+        context.id,
+        selected.map(({ candidate }) => candidate.evaluatedPlace.place),
+      );
+      // Ảnh chỉ resolve cho đúng những option trả về client — mỗi place là một
+      // call Place Photo, không đốt quota cho candidate đã bị loại.
+      const images = await Promise.all(
+        selected.map(({ candidate }) => this.resolveImages(candidate.evaluatedPlace.place)),
+      );
+      const suggestions = selected.map(({ scored, candidate }, index) => {
         const suggestionId = suggestionIds.get(scored.id);
-        if (!candidate) return [];
         if (!suggestionId) {
           throw new Error(`Không persist được suggestion option cho ${scored.id}`);
         }
-        return [
-          this.toSuggestion(candidate.evaluatedPlace, candidate.travelTimes, scored, suggestionId),
-        ];
+        return this.toSuggestion(
+          candidate.evaluatedPlace,
+          candidate.travelTimes,
+          scored,
+          suggestionId,
+          images[index] ?? [],
+        );
       });
+
+      // Lưu lại nội dung provider để lần sau đọc từ DB thay vì trả tiền gọi
+      // lại pipeline này. Best-effort: response vẫn trả bình thường nếu ghi hỏng.
+      await this.persistSnapshots(selected, suggestions);
 
       return {
         status: suggestions.length > 0 ? 'ok' : 'no_candidates',
@@ -274,13 +302,65 @@ export class SuggestionService {
     return (typeScore + budgetScore) / 2;
   }
 
+  /**
+   * Ảnh lưu resource name chứ không lưu URL trong `images`: URL đã ký của Google
+   * hết hạn sau ít phút, còn resource name thì resolve lại được mãi.
+   */
+  private async persistSnapshots(
+    selected: { candidate: { evaluatedPlace: EvaluatedPlace } }[],
+    suggestions: SuggestionView[],
+  ): Promise<void> {
+    try {
+      await this.snapshots.saveMany(
+        suggestions.map((suggestion, index) => {
+          const place = selected[index]!.candidate.evaluatedPlace.place;
+          return {
+            suggestionId: suggestion.suggestionId,
+            provider: suggestion.provider,
+            externalPlaceId: suggestion.id,
+            name: suggestion.name,
+            address: place.address,
+            location: suggestion.location,
+            primaryType: suggestion.primaryType,
+            types: suggestion.types,
+            rating: suggestion.rating,
+            userRatingCount: suggestion.userRatingCount,
+            priceLevel: suggestion.priceLevel,
+            mapsUri: suggestion.mapsUri,
+            photoNames: (place.photos ?? []).map((photo) => photo.name),
+            // URL này vừa được resolve và tính tiền ở trên; lưu lại để lần đọc
+            // đầu tiên khỏi gọi Place Photo thêm một lượt nữa.
+            photoUri: suggestion.images[0],
+            availability: suggestion.availability,
+            score: suggestion.score,
+            scoreBreakdown: suggestion.scoreBreakdown,
+            travelTimes: suggestion.travelTimes,
+          };
+        }),
+      );
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      this.logger.error(`Không lưu được snapshot gợi ý: ${message}`);
+    }
+  }
+
+  private async resolveImages(place: PlaceCandidate): Promise<string[]> {
+    const photo = place.photos?.[0];
+    if (!photo) return [];
+
+    const uri = await this.photoProvider.resolvePhotoUri(photo);
+    return uri ? [uri] : [];
+  }
+
   private toSuggestion(
     candidate: EvaluatedPlace,
     travelTimes: TravelTimeView[],
     scored: ReturnType<typeof rankCandidates>['candidates'][number],
     suggestionId: string,
+    images: string[],
   ): SuggestionView {
     const place = candidate.place;
+    const typeLabels = placeTypeLabels(place.types, place.primaryType);
     return {
       suggestionId,
       id: place.externalId,
@@ -289,9 +369,13 @@ export class SuggestionService {
       location: place.location,
       primaryType: place.primaryType,
       types: place.types,
+      primaryTypeLabel: typeLabels[0],
+      typeLabels,
       rating: place.rating,
       userRatingCount: place.userRatingCount,
       priceLevel: place.priceLevel,
+      images,
+      mapsUri: place.mapsUri ?? place.googleMapsUri,
       googleMapsUri: place.googleMapsUri,
       availability: candidate.availability,
       score: scored.score,
@@ -382,7 +466,19 @@ export class SuggestionService {
     ) {
       throw new ServiceUnavailableException(error.message);
     }
-    if (error instanceof GoogleMapsHttpError || error instanceof ZodError) {
+    if (error instanceof GoogleMapsHttpError) {
+      // Payload của Google có thể chứa chi tiết key/project — chỉ log, không trả client.
+      this.logger.error(`Google Maps HTTP ${error.status}: ${error.message}`);
+      if (error.status === 401 || error.status === 403) {
+        throw new ServiceUnavailableException('Provider bản đồ chưa được cấp quyền cho API này');
+      }
+      if (error.status === 429) {
+        throw new HttpException('Provider bản đồ đang bị giới hạn', HttpStatus.TOO_MANY_REQUESTS);
+      }
+      throw new BadGatewayException('Provider bản đồ trả về lỗi');
+    }
+    if (error instanceof ZodError) {
+      this.logger.error(`Google Maps payload không hợp lệ: ${error.message}`);
       throw new BadGatewayException('Provider bản đồ trả về lỗi');
     }
     throw error;

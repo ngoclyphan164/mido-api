@@ -1,0 +1,2 @@
+ALTER TABLE "suggestions" DROP CONSTRAINT "suggestions_rank_range";--> statement-breakpoint
+ALTER TABLE "suggestions" ADD CONSTRAINT "suggestions_rank_range" CHECK ("suggestions"."rank" between 1 and 20);

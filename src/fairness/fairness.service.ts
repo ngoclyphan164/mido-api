@@ -6,17 +6,24 @@ import {
   UnprocessableEntityException,
 } from '@nestjs/common';
 
+import { SuggestionSnapshotService } from '../suggestions/suggestion-snapshot.service';
 import type { CompleteHangoutDto } from './dto/fairness.dto';
 import { FairnessRepository } from './fairness.repository';
 
 @Injectable()
 export class FairnessService {
-  constructor(private readonly repository: FairnessRepository) {}
+  constructor(
+    private readonly repository: FairnessRepository,
+    private readonly snapshots: SuggestionSnapshotService,
+  ) {}
 
   async decide(hangoutId: string, userId: string, suggestionId: string) {
     const result = await this.repository.decide(hangoutId, userId, suggestionId);
     switch (result.kind) {
       case 'ok':
+        // Sau khi transaction commit, không phải trong nó: đây là một call HTTP
+        // ra Google, không được giữ lock hàng `hangouts` trong lúc chờ.
+        await this.snapshots.captureChosen(hangoutId);
         return { outing: result.outing };
       case 'not_found':
         throw new NotFoundException('Không tìm thấy kèo hoặc bạn không thuộc nhóm này');

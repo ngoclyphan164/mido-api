@@ -1,0 +1,1 @@
+DROP TABLE "outing_places" CASCADE;

@@ -9,6 +9,14 @@
       "rating": 4.6,
       "userRatingCount": 321,
       "priceLevel": "PRICE_LEVEL_MODERATE",
+      "photos": [
+        {
+          "name": "places/ChIJ-fixture-cafe/photos/AeeoHcK-fixture",
+          "widthPx": 4032,
+          "heightPx": 3024,
+          "authorAttributions": [{ "displayName": "Nguyễn Fixture" }]
+        }
+      ],
       "regularOpeningHours": {
         "periods": [
           {

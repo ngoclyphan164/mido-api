@@ -1,9 +1,25 @@
-import { Body, Controller, Get, HttpCode, HttpStatus, Param, Post } from '@nestjs/common';
+import {
+  Body,
+  Controller,
+  Delete,
+  Get,
+  HttpCode,
+  HttpStatus,
+  Param,
+  Patch,
+  Post,
+} from '@nestjs/common';
 import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
 
 import type { AuthUser } from '../auth/auth.types';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
-import { CreateGroupDto, GroupIdParamsDto, JoinGroupDto, RotateInviteDto } from './dto/group.dto';
+import {
+  CreateGroupDto,
+  GroupIdParamsDto,
+  JoinGroupDto,
+  RotateInviteDto,
+  UpdateGroupDto,
+} from './dto/group.dto';
 import { GroupService } from './group.service';
 
 @ApiTags('groups')
@@ -38,6 +54,23 @@ export class GroupController {
   @ApiOperation({ summary: 'Chi tiết nhóm kèm danh sách thành viên' })
   detail(@Param() params: GroupIdParamsDto, @CurrentUser() user: AuthUser) {
     return this.groups.detail(params.id, user.id);
+  }
+
+  @Patch(':id')
+  @ApiOperation({ summary: 'Đổi tên nhóm; chỉ owner/admin' })
+  update(
+    @Param() params: GroupIdParamsDto,
+    @Body() body: UpdateGroupDto,
+    @CurrentUser() user: AuthUser,
+  ) {
+    return this.groups.update(params.id, user.id, body.name);
+  }
+
+  @Delete(':id')
+  @HttpCode(HttpStatus.NO_CONTENT)
+  @ApiOperation({ summary: 'Xóa nhóm và dữ liệu liên quan; chỉ owner' })
+  async remove(@Param() params: GroupIdParamsDto, @CurrentUser() user: AuthUser): Promise<void> {
+    await this.groups.remove(params.id, user.id);
   }
 
   @Post(':id/invite')

@@ -1,0 +1,2 @@
+ALTER TABLE "participants" ADD COLUMN "origin_address" varchar(512);--> statement-breakpoint
+ALTER TABLE "participants" ADD CONSTRAINT "participants_origin_address_not_blank" CHECK ("participants"."origin_address" is null or length(trim("participants"."origin_address")) > 0);

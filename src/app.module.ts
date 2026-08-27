@@ -11,6 +11,7 @@ import { GroupModule } from './groups/group.module';
 import { HangoutModule } from './hangouts/hangout.module';
 import { HealthModule } from './health/health.module';
 import { MidpointModule } from './midpoint/midpoint.module';
+import { PlacesModule } from './places/places.module';
 import { SuggestionModule } from './suggestions/suggestion.module';
 import { VoteModule } from './votes/vote.module';
 
@@ -25,6 +26,7 @@ import { VoteModule } from './votes/vote.module';
     GroupModule,
     HangoutModule,
     MidpointModule,
+    PlacesModule,
     SuggestionModule,
     VoteModule,
     FairnessModule,

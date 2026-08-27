@@ -31,12 +31,34 @@ describe('GoogleMapsClient', () => {
     });
   });
 
+  it('getJson đưa query vào URL nhưng vẫn giữ API key trong header', async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValue(new Response(JSON.stringify({ photoUri: 'https://lh3/photo' })));
+    vi.stubGlobal('fetch', fetchMock);
+    const client = new GoogleMapsClient(
+      new ConfigService({ GOOGLE_MAPS_API_KEY: 'fixture-key-at-least-20-chars' }),
+    );
+
+    await expect(
+      client.getJson('https://maps.example/media', { maxWidthPx: 800, skipHttpRedirect: true }),
+    ).resolves.toEqual({ photoUri: 'https://lh3/photo' });
+
+    const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+    expect(url).toBe('https://maps.example/media?maxWidthPx=800&skipHttpRedirect=true');
+    expect(url).not.toContain('fixture-key');
+    expect(init.headers).toMatchObject({ 'X-Goog-Api-Key': 'fixture-key-at-least-20-chars' });
+  });
+
   it('fail rõ ràng trước network khi API key chưa cấu hình', async () => {
     const fetchMock = vi.fn();
     vi.stubGlobal('fetch', fetchMock);
     const client = new GoogleMapsClient(new ConfigService());
 
     await expect(client.postJson('https://maps.example', 'places.id', {})).rejects.toBeInstanceOf(
+      GoogleMapsConfigurationError,
+    );
+    await expect(client.getJson('https://maps.example/media')).rejects.toBeInstanceOf(
       GoogleMapsConfigurationError,
     );
     expect(fetchMock).not.toHaveBeenCalled();

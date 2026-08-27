@@ -26,6 +26,7 @@ const GOOGLE_PLACES_FIELD_MASK = [
   'places.rating',
   'places.userRatingCount',
   'places.priceLevel',
+  'places.photos',
   'places.regularOpeningHours',
   'places.googleMapsUri',
   'places.businessStatus',
@@ -53,6 +54,18 @@ const placeSchema = z.object({
   rating: z.number().min(0).max(5).optional(),
   userRatingCount: z.number().int().nonnegative().optional(),
   priceLevel: z.string().optional(),
+  photos: z
+    .array(
+      z.object({
+        name: z.string().min(1),
+        widthPx: z.number().int().positive().optional(),
+        heightPx: z.number().int().positive().optional(),
+        authorAttributions: z
+          .array(z.object({ displayName: z.string().min(1) }).partial())
+          .optional(),
+      }),
+    )
+    .optional(),
   regularOpeningHours: z
     .object({
       periods: z
@@ -169,7 +182,16 @@ export class GooglePlacesProvider implements PlacesProvider {
       rating: place.rating,
       userRatingCount: place.userRatingCount,
       priceLevel: place.priceLevel ? priceLevels[place.priceLevel] : undefined,
+      photos: place.photos?.map((photo) => ({
+        name: photo.name,
+        widthPx: photo.widthPx,
+        heightPx: photo.heightPx,
+        attributions: photo.authorAttributions?.flatMap((author) =>
+          author.displayName ? [author.displayName] : [],
+        ),
+      })),
       regularOpeningHours: place.regularOpeningHours,
+      mapsUri: place.googleMapsUri,
       googleMapsUri: place.googleMapsUri,
       businessStatus: place.businessStatus,
       utcOffsetMinutes: place.utcOffsetMinutes,

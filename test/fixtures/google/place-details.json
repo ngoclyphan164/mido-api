@@ -1,0 +1,20 @@
+{
+  "id": "ChIJ-fixture-cafe",
+  "displayName": { "text": "Cà phê Fixture", "languageCode": "vi" },
+  "formattedAddress": "12 Nguyễn Huệ, Bến Nghé, Quận 1, TP.HCM",
+  "location": { "latitude": 10.7761, "longitude": 106.7009 },
+  "primaryType": "cafe",
+  "types": ["cafe", "coffee_shop", "food", "point_of_interest"],
+  "rating": 4.6,
+  "userRatingCount": 321,
+  "priceLevel": "PRICE_LEVEL_MODERATE",
+  "photos": [
+    {
+      "name": "places/ChIJ-fixture-cafe/photos/AeeoHcK-fixture",
+      "widthPx": 4032,
+      "heightPx": 3024,
+      "authorAttributions": [{ "displayName": "Nguyễn Fixture" }]
+    }
+  ],
+  "googleMapsUri": "https://maps.google.com/?cid=fixture-cafe"
+}

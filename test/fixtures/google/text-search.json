@@ -1,0 +1,20 @@
+{
+  "places": [
+    {
+      "id": "ChIJ-fixture-landmark",
+      "displayName": { "text": "Landmark 81", "languageCode": "vi" },
+      "formattedAddress": "720A Điện Biên Phủ, Bình Thạnh, Thành phố Hồ Chí Minh, Việt Nam",
+      "location": { "latitude": 10.7949, "longitude": 106.7219 },
+      "primaryType": "shopping_mall",
+      "types": ["shopping_mall", "point_of_interest", "establishment"]
+    },
+    {
+      "id": "ChIJ-fixture-landmark-plus",
+      "displayName": { "text": "Landmark 81 SkyView", "languageCode": "vi" },
+      "formattedAddress": "Tầng 79, Vinhomes Central Park, Thành phố Hồ Chí Minh, Việt Nam",
+      "location": { "latitude": 10.7947, "longitude": 106.7215 },
+      "primaryType": "tourist_attraction",
+      "types": ["tourist_attraction", "point_of_interest"]
+    }
+  ]
+}

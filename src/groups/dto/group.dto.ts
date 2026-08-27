@@ -11,6 +11,12 @@ export class CreateGroupDto extends createZodDto(
   }),
 ) {}
 
+export class UpdateGroupDto extends createZodDto(
+  z.object({
+    name: z.string().trim().min(1).max(120),
+  }),
+) {}
+
 export class JoinGroupDto extends createZodDto(
   z.object({ inviteCode: z.string().trim().min(4).max(16) }),
 ) {}

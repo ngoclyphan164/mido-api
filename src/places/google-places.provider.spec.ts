@@ -30,11 +30,21 @@ describe('GooglePlacesProvider', () => {
       priceLevel: 2,
       rating: 4.6,
     });
+    // Nearby chỉ trả reference; URL ảnh do PlacePhotoProvider resolve sau khi rank.
+    expect(result.places[0]?.photos).toEqual([
+      {
+        name: 'places/ChIJ-fixture-cafe/photos/AeeoHcK-fixture',
+        widthPx: 4032,
+        heightPx: 3024,
+        attributions: ['Nguyễn Fixture'],
+      },
+    ]);
 
     expect(postJson).toHaveBeenCalledOnce();
     const [url, fieldMask, body] = postJson.mock.calls[0] as [string, string, object];
     expect(url).toBe('https://places.googleapis.com/v1/places:searchNearby');
     expect(fieldMask).toContain('places.id');
+    expect(fieldMask).toContain('places.photos');
     expect(fieldMask).not.toContain('*');
     expect(body).toMatchObject({
       includedTypes: ['cafe'],

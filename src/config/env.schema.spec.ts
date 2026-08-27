@@ -6,6 +6,7 @@ describe('validateEnv', () => {
   const requiredEnv = {
     DATABASE_POSTGRES_URL: 'postgresql://postgres:postgres@localhost:5432/postgres',
     DATABASE_SUPABASE_URL: 'https://example.supabase.co',
+    DATABASE_SUPABASE_SERVICE_ROLE_KEY: 'test-service-role-key-at-least-20-chars',
   };
 
   it('mặc định ALLOWED_ORIGINS là danh sách rỗng, không phải ["*"]', () => {
@@ -49,7 +50,7 @@ describe('validateEnv', () => {
     ).toBe('https://example.supabase.co');
   });
 
-  it('bắt buộc có DATABASE_POSTGRES_URL và DATABASE_SUPABASE_URL', () => {
+  it('bắt buộc có cấu hình Postgres và Supabase Admin', () => {
     expect(() => validateEnv({})).toThrow(/DATABASE_POSTGRES_URL/);
   });
 
@@ -63,13 +64,41 @@ describe('validateEnv', () => {
     ).toBe(250);
   });
 
+  it('coerce budget của Text Search và Place Photo', () => {
+    const env = validateEnv({
+      ...requiredEnv,
+      GOOGLE_TEXT_SEARCH_DAILY_REQUEST_LIMIT: '250',
+      GOOGLE_PLACE_PHOTO_MAX_WIDTH_PX: '1200',
+    });
+
+    expect(env.GOOGLE_TEXT_SEARCH_DAILY_REQUEST_LIMIT).toBe(250);
+    expect(env.GOOGLE_PLACE_PHOTO_MAX_WIDTH_PX).toBe(1_200);
+    expect(validateEnv(requiredEnv).GOOGLE_PLACE_PHOTO_DAILY_REQUEST_LIMIT).toBe(2_000);
+    expect(() => validateEnv({ ...requiredEnv, GOOGLE_PLACE_PHOTO_MAX_WIDTH_PX: '99' })).toThrow(
+      /GOOGLE_PLACE_PHOTO_MAX_WIDTH_PX/,
+    );
+  });
+
   it('đọc trực tiếp tên biến do Vercel Supabase Integration tạo', () => {
     const env = validateEnv({
       DATABASE_POSTGRES_URL: 'postgresql://postgres:postgres@pooler.example.com:6543/postgres',
       DATABASE_SUPABASE_URL: 'https://vercel-integration.supabase.co/',
+      DATABASE_SUPABASE_SERVICE_ROLE_KEY: 'integration-service-role-key-at-least-20-chars',
     });
 
     expect(env.DATABASE_POSTGRES_URL).toContain('pooler.example.com:6543');
     expect(env.DATABASE_SUPABASE_URL).toBe('https://vercel-integration.supabase.co');
+  });
+
+  it('từ chối service role key bị thiếu hoặc quá ngắn', () => {
+    expect(() =>
+      validateEnv({
+        DATABASE_POSTGRES_URL: requiredEnv.DATABASE_POSTGRES_URL,
+        DATABASE_SUPABASE_URL: requiredEnv.DATABASE_SUPABASE_URL,
+      }),
+    ).toThrow(/DATABASE_SUPABASE_SERVICE_ROLE_KEY/);
+    expect(() =>
+      validateEnv({ ...requiredEnv, DATABASE_SUPABASE_SERVICE_ROLE_KEY: 'short' }),
+    ).toThrow(/DATABASE_SUPABASE_SERVICE_ROLE_KEY/);
   });
 });

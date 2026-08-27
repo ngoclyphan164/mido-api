@@ -1,11 +1,24 @@
-import { ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
+import {
+  ConflictException,
+  ForbiddenException,
+  Injectable,
+  NotFoundException,
+} from '@nestjs/common';
 
-import type { CreateHangoutInput, UpsertParticipantInput } from './hangout.repository';
+import { SuggestionSnapshotService } from '../suggestions/suggestion-snapshot.service';
+import type {
+  CreateHangoutInput,
+  UpdateHangoutInput,
+  UpsertParticipantInput,
+} from './hangout.repository';
 import { HangoutRepository } from './hangout.repository';
 
 @Injectable()
 export class HangoutService {
-  constructor(private readonly repository: HangoutRepository) {}
+  constructor(
+    private readonly repository: HangoutRepository,
+    private readonly snapshots: SuggestionSnapshotService,
+  ) {}
 
   async create(groupId: string, userId: string, input: CreateHangoutInput) {
     if (!(await this.repository.isGroupMember(groupId, userId))) {
@@ -25,7 +38,47 @@ export class HangoutService {
   async detail(hangoutId: string, userId: string) {
     const hangout = await this.repository.findDetail(hangoutId, userId);
     if (!hangout) throw new NotFoundException('Không tìm thấy kèo hoặc bạn không thuộc nhóm này');
-    return hangout;
+    // Chỉ kèo đã chốt mới có địa điểm để trả; kèo đang lên không đụng tới
+    // bảng snapshot lẫn Google.
+    if (!hangout.outing) return hangout;
+
+    return {
+      ...hangout,
+      outing: {
+        ...hangout.outing,
+        place: await this.snapshots.getChosenForHangout(hangoutId),
+      },
+    };
+  }
+
+  async update(hangoutId: string, userId: string, input: UpdateHangoutInput) {
+    const result = await this.repository.update(hangoutId, userId, input);
+    switch (result.kind) {
+      case 'ok':
+        return result.hangout;
+      case 'forbidden':
+        throw new ForbiddenException('Chỉ người tạo kèo hoặc owner/admin mới được sửa kèo');
+      case 'immutable':
+        throw new ConflictException(`Không thể sửa kèo đang ở trạng thái ${result.status}`);
+      case 'not_found':
+        throw new NotFoundException('Không tìm thấy kèo hoặc bạn không thuộc nhóm này');
+    }
+  }
+
+  async remove(hangoutId: string, userId: string): Promise<void> {
+    const result = await this.repository.remove(hangoutId, userId);
+    switch (result.kind) {
+      case 'ok':
+        return;
+      case 'forbidden':
+        throw new ForbiddenException('Chỉ người tạo kèo hoặc owner/admin mới được xóa kèo');
+      case 'immutable':
+        throw new ConflictException(
+          `Không thể xóa kèo đang ở trạng thái ${result.status} vì có dữ liệu outing/fairness`,
+        );
+      case 'not_found':
+        throw new NotFoundException('Không tìm thấy kèo hoặc bạn không thuộc nhóm này');
+    }
   }
 
   async upsertOwnParticipant(hangoutId: string, userId: string, input: UpsertParticipantInput) {
