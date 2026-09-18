@@ -5,6 +5,7 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 
+import { SavedLocationRepository } from '../saved-locations/saved-location.repository';
 import { SuggestionSnapshotService } from '../suggestions/suggestion-snapshot.service';
 import type {
   CreateHangoutInput,
@@ -13,11 +14,22 @@ import type {
 } from './hangout.repository';
 import { HangoutRepository } from './hangout.repository';
 
+/**
+ * Đúng một trong hai đường vào, DTO đã ép bằng superRefine: toạ độ thô, hoặc id
+ * của một địa điểm đã lưu.
+ */
+export type UpsertOwnParticipantInput = Omit<UpsertParticipantInput, 'lat' | 'lng'> & {
+  lat?: number;
+  lng?: number;
+  savedLocationId?: string;
+};
+
 @Injectable()
 export class HangoutService {
   constructor(
     private readonly repository: HangoutRepository,
     private readonly snapshots: SuggestionSnapshotService,
+    private readonly savedLocations: SavedLocationRepository,
   ) {}
 
   async create(groupId: string, userId: string, input: CreateHangoutInput) {
@@ -81,7 +93,7 @@ export class HangoutService {
     }
   }
 
-  async upsertOwnParticipant(hangoutId: string, userId: string, input: UpsertParticipantInput) {
+  async upsertOwnParticipant(hangoutId: string, userId: string, input: UpsertOwnParticipantInput) {
     // Reuse the detail read for its membership check, and to refuse edits once
     // the kèo has moved past planning.
     const hangout = await this.detail(hangoutId, userId);
@@ -91,8 +103,37 @@ export class HangoutService {
       );
     }
 
-    const participant = await this.repository.upsertOwnParticipant(hangoutId, userId, input);
+    const resolved = await this.resolveOrigin(userId, input);
+
+    const participant = await this.repository.upsertOwnParticipant(hangoutId, userId, resolved);
     if (!participant) throw new NotFoundException('Không tìm thấy profile của bạn');
     return participant;
+  }
+
+  /**
+   * Địa điểm đã lưu mang sẵn địa chỉ, nên chọn "Nhà" điền được cả toạ độ lẫn
+   * `originAddress` mà không phải geocode ngược lần nữa. Body vẫn ghi đè được
+   * địa chỉ, cho trường hợp người dùng sửa tay sau khi chọn.
+   */
+  private async resolveOrigin(
+    userId: string,
+    input: UpsertOwnParticipantInput,
+  ): Promise<UpsertParticipantInput> {
+    const { savedLocationId, ...rest } = input;
+
+    if (savedLocationId === undefined) {
+      // DTO đã bảo đảm có cả hai khi không gửi savedLocationId.
+      return { ...rest, lat: rest.lat!, lng: rest.lng! };
+    }
+
+    const saved = await this.savedLocations.findOwned(savedLocationId, userId);
+    if (!saved) throw new NotFoundException('Không tìm thấy địa điểm đã lưu');
+
+    return {
+      ...rest,
+      lat: saved.location.lat,
+      lng: saved.location.lng,
+      originAddress: rest.originAddress ?? saved.address,
+    };
   }
 }

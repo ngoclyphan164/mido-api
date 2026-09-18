@@ -1,7 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import { and, desc, eq, inArray, sql } from 'drizzle-orm';
 
-import { toGeographyPoint } from '../database/geography';
+import { geographyLat, geographyLng, toGeographyPoint } from '../database/geography';
 import { DatabaseService } from '../database/database.service';
 import {
   groupMembers,
@@ -36,8 +36,9 @@ export type UpdateHangoutInput = {
 export type UpsertParticipantInput = {
   lat: number;
   lng: number;
-  originAddress?: string;
-  travelMode: TravelMode;
+  originAddress?: string | null;
+  /** Bỏ trống thì lấy `profiles.default_travel_mode`. */
+  travelMode?: TravelMode;
   displayName?: string;
   weight?: number;
   isFlexible?: boolean;
@@ -99,8 +100,8 @@ type HangoutManagementAccess = {
   status: HangoutStatus;
 };
 
-const originLat = sql<number>`extensions.ST_Y(${participants.origin}::extensions.geometry)::double precision`;
-const originLng = sql<number>`extensions.ST_X(${participants.origin}::extensions.geometry)::double precision`;
+const originLat = geographyLat(participants.origin);
+const originLng = geographyLng(participants.origin);
 
 @Injectable()
 export class HangoutRepository {
@@ -319,13 +320,20 @@ export class HangoutRepository {
     input: UpsertParticipantInput,
   ): Promise<ParticipantView | undefined> {
     const [profile] = await this.database.db
-      .select({ displayName: profiles.displayName })
+      .select({
+        displayName: profiles.displayName,
+        defaultTravelMode: profiles.defaultTravelMode,
+      })
       .from(profiles)
       .where(eq(profiles.id, userId))
       .limit(1);
 
     const displayName = input.displayName ?? profile?.displayName;
     if (!displayName) return undefined;
+
+    // The column is NOT NULL DEFAULT 'two_wheeler', so the profile always has an
+    // answer once the row exists — no third fallback needed.
+    const travelMode = input.travelMode ?? profile?.defaultTravelMode ?? 'two_wheeler';
 
     const origin = toGeographyPoint({ lat: input.lat, lng: input.lng });
     const weight = input.weight === undefined ? undefined : input.weight.toFixed(2);
@@ -339,7 +347,7 @@ export class HangoutRepository {
         displayName,
         origin,
         originAddress: input.originAddress ?? null,
-        travelMode: input.travelMode,
+        travelMode,
         ...(weight === undefined ? null : { weight }),
         ...(input.isFlexible === undefined ? null : { isFlexible: input.isFlexible }),
       })
@@ -350,7 +358,7 @@ export class HangoutRepository {
           origin,
           // Never retain an address that belonged to the previous coordinate.
           originAddress: input.originAddress ?? null,
-          travelMode: input.travelMode,
+          travelMode,
           ...(weight === undefined ? null : { weight }),
           ...(input.isFlexible === undefined ? null : { isFlexible: input.isFlexible }),
           updatedAt: now,

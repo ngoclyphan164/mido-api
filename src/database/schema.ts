@@ -114,12 +114,24 @@ export const savedLocations = pgTable(
       .references(() => profiles.id, { onDelete: 'cascade' }),
     label: varchar('label', { length: 80 }).notNull(),
     geog: geographyPoint('geog').notNull(),
+    /**
+     * Địa chỉ đã resolve tại đúng toạ độ này. Toàn bộ điểm lợi của địa điểm lưu
+     * sẵn là điền được cả `participants.origin_address` mà không phải geocode
+     * lại — mà `PUT /hangouts/:id/participants/me` cần address mới lưu được.
+     */
+    address: varchar('address', { length: 512 }),
     ...timestamps,
   },
   (table) => [
     index('saved_locations_user_idx').on(table.userId),
     index('saved_locations_geog_gist_idx').using('gist', table.geog),
+    // Lưu hai chỗ cùng tên "Nhà" là UX tệ, và unique index thì miễn phí.
+    uniqueIndex('saved_locations_user_label_uidx').on(table.userId, table.label),
     check('saved_locations_label_not_blank', sql`length(trim(${table.label})) > 0`),
+    check(
+      'saved_locations_address_not_blank',
+      sql`${table.address} is null or length(trim(${table.address})) > 0`,
+    ),
   ],
 ).enableRLS();
 

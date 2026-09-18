@@ -2,7 +2,7 @@ import { Injectable } from '@nestjs/common';
 import { and, eq, inArray, sql } from 'drizzle-orm';
 
 import { DatabaseService } from '../database/database.service';
-import { toGeographyPoint } from '../database/geography';
+import { geographyLat, geographyLng, toGeographyPoint } from '../database/geography';
 import {
   groupMembers,
   hangouts,
@@ -13,8 +13,8 @@ import {
   votes,
 } from '../database/schema';
 
-const placeLat = sql<number>`extensions.ST_Y(${suggestionPlaces.geog}::extensions.geometry)::double precision`;
-const placeLng = sql<number>`extensions.ST_X(${suggestionPlaces.geog}::extensions.geometry)::double precision`;
+const placeLat = geographyLat(suggestionPlaces.geog);
+const placeLng = geographyLng(suggestionPlaces.geog);
 
 export type StoredTravelTime = {
   participantId: string;

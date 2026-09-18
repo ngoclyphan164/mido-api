@@ -54,15 +54,37 @@ export class UpdateHangoutDto extends createZodDto(
 ) {}
 
 export class UpsertParticipantDto extends createZodDto(
-  z.object({
-    lat: z.number().min(-90).max(90),
-    lng: z.number().min(-180).max(180),
-    /** Địa chỉ đã resolve tại đúng tọa độ xuất phát; client cũ có thể bỏ trống. */
-    originAddress: z.string().trim().min(1).max(512).optional(),
-    travelMode: z.enum(['two_wheeler', 'drive', 'walk', 'transit']).default('two_wheeler'),
-    /** Bỏ trống thì lấy display name trong profile. */
-    displayName: z.string().trim().min(1).max(100).optional(),
-    weight: z.number().min(0.6).max(1.4).optional(),
-    isFlexible: z.boolean().optional(),
-  }),
+  z
+    .object({
+      lat: z.number().min(-90).max(90).optional(),
+      lng: z.number().min(-180).max(180).optional(),
+      /** Thay cho lat/lng: lấy toạ độ và địa chỉ từ một địa điểm đã lưu của chính mình. */
+      savedLocationId: z.string().uuid().optional(),
+      /** Địa chỉ đã resolve tại đúng tọa độ xuất phát; client cũ có thể bỏ trống. */
+      originAddress: z.string().trim().min(1).max(512).optional(),
+      /**
+       * Bỏ trống thì lấy `default_travel_mode` trong profile. Không đặt `.default()`
+       * ở đây, nếu không service không phân biệt được "không gửi" với "gửi xe máy".
+       */
+      travelMode: z.enum(['two_wheeler', 'drive', 'walk', 'transit']).optional(),
+      /** Bỏ trống thì lấy display name trong profile. */
+      displayName: z.string().trim().min(1).max(100).optional(),
+      weight: z.number().min(0.6).max(1.4).optional(),
+      isFlexible: z.boolean().optional(),
+    })
+    .superRefine((value, ctx) => {
+      const hasCoordinate = value.lat !== undefined && value.lng !== undefined;
+      const hasHalfCoordinate = (value.lat === undefined) !== (value.lng === undefined);
+
+      if (hasHalfCoordinate) {
+        ctx.addIssue({ code: z.ZodIssueCode.custom, message: 'lat và lng phải gửi cùng nhau' });
+        return;
+      }
+      if (hasCoordinate === (value.savedLocationId !== undefined)) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: 'Gửi lat/lng hoặc savedLocationId, đúng một trong hai',
+        });
+      }
+    }),
 ) {}

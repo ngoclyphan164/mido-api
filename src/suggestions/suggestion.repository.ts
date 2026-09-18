@@ -2,6 +2,7 @@ import { Injectable } from '@nestjs/common';
 import { and, eq, inArray, sql } from 'drizzle-orm';
 
 import { DatabaseService } from '../database/database.service';
+import { geographyLat, geographyLng } from '../database/geography';
 import {
   fairnessLedger,
   groupMembers,
@@ -79,8 +80,8 @@ export class SuggestionRepository {
         name: participants.displayName,
         mode: participants.travelMode,
         weight: participants.weight,
-        lat: sql<number>`extensions.ST_Y(${participants.origin}::extensions.geometry)::double precision`,
-        lng: sql<number>`extensions.ST_X(${participants.origin}::extensions.geometry)::double precision`,
+        lat: geographyLat(participants.origin),
+        lng: geographyLng(participants.origin),
       })
       .from(participants)
       .where(eq(participants.hangoutId, hangoutId))

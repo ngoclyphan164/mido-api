@@ -5,12 +5,23 @@ import { z } from 'zod';
 
 import type { AccessTokenVerifier, AuthUser } from './auth.types';
 
+/**
+ * Supabase phát token cho anonymous user với `email` và `phone` là CHUỖI RỖNG,
+ * không phải thiếu trường.
+ *
+ * `''` không phải `undefined` nên `.optional()` không bỏ qua nó, mà `''` thì
+ * trượt `.email()` — schema ném, guard đổi thành 401, và MỌI request của khách
+ * hỏng trong khi tài khoản email vẫn chạy bình thường. Triệu chứng không hề chỉ
+ * về phía claim nào, nên quy chuỗi rỗng về `undefined` ngay tại đây.
+ */
+const blankToUndefined = (value: unknown) => (value === '' ? undefined : value);
+
 const supabaseClaimsSchema = z.object({
   sub: z.string().uuid(),
   role: z.literal('authenticated'),
   session_id: z.string().uuid().optional(),
-  email: z.string().email().optional(),
-  phone: z.string().optional(),
+  email: z.preprocess(blankToUndefined, z.string().email().optional()),
+  phone: z.preprocess(blankToUndefined, z.string().optional()),
   is_anonymous: z.boolean().default(false),
   aal: z.enum(['aal1', 'aal2']).optional(),
 });
