@@ -22,9 +22,9 @@ export class SavedLocationService {
       case 'ok':
         return result.location;
       case 'limit_reached':
-        throw new ConflictException(`Bạn chỉ lưu được tối đa ${SAVED_LOCATION_LIMIT} địa điểm`);
+        throw new ConflictException(`You can save at most ${SAVED_LOCATION_LIMIT} locations`);
       case 'duplicate_label':
-        throw new ConflictException('Bạn đã lưu một địa điểm cùng tên rồi');
+        throw new ConflictException('You already have a saved location with this name');
     }
   }
 
@@ -38,9 +38,9 @@ export class SavedLocationService {
       case 'ok':
         return result.location;
       case 'duplicate_label':
-        throw new ConflictException('Bạn đã lưu một địa điểm cùng tên rồi');
+        throw new ConflictException('You already have a saved location with this name');
       case 'not_found':
-        throw new NotFoundException('Không tìm thấy địa điểm đã lưu');
+        throw new NotFoundException('Saved location not found');
     }
   }
 
@@ -50,6 +50,6 @@ export class SavedLocationService {
    */
   async remove(id: string, userId: string): Promise<void> {
     const removed = await this.repository.remove(id, userId);
-    if (!removed) throw new NotFoundException('Không tìm thấy địa điểm đã lưu');
+    if (!removed) throw new NotFoundException('Saved location not found');
   }
 }

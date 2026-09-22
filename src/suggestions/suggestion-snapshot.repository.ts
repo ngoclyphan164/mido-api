@@ -8,9 +8,11 @@ import {
   hangouts,
   outings,
   providerPlaceRefs,
+  participants,
+  picks,
+  profiles,
   suggestionPlaces,
   suggestions,
-  votes,
 } from '../database/schema';
 
 const placeLat = geographyLat(suggestionPlaces.geog);
@@ -74,7 +76,11 @@ export type SuggestionSnapshotInput = {
   travelTimes: StoredTravelTime[];
 };
 
-export type VoteTally = { up: number; down: number; veto: number; total: number };
+/**
+ * Ai đã tick chọn một quán. Danh sách người chứ không phải con số: card ở màn
+ * gợi ý xếp avatar của họ lên, nên tên và ảnh phải đi cùng.
+ */
+export type PickerView = { userId: string; displayName: string; avatarUrl?: string };
 
 const selection = {
   id: suggestionPlaces.id,
@@ -261,30 +267,40 @@ export class SuggestionSnapshotRepository {
       .where(eq(suggestionPlaces.id, snapshotId));
   }
 
-  /** Tally theo từng suggestion, để mở lại app vẫn thấy nhóm đã vote gì. */
-  async tallies(suggestionIds: string[]): Promise<Map<string, VoteTally>> {
+  /**
+   * Ai đã tick quán nào, để mở lại app vẫn thấy nguyên lựa chọn của cả nhóm.
+   *
+   * Tên và ảnh lấy từ `profiles` chứ không từ `participants.display_name`: bản
+   * trên participant là ảnh chụp lúc người đó nhập vị trí, nên đổi tên ở Hồ sơ
+   * xong sẽ thấy tên cũ dưới avatar của chính mình.
+   */
+  async pickers(suggestionIds: string[]): Promise<Map<string, PickerView[]>> {
     if (suggestionIds.length === 0) return new Map();
 
     const rows = await this.database.db
       .select({
-        suggestionId: votes.suggestionId,
-        value: votes.value,
-        count: sql<number>`count(*)::int`,
+        suggestionId: picks.suggestionId,
+        userId: participants.userId,
+        displayName: profiles.displayName,
+        avatarUrl: profiles.avatarUrl,
       })
-      .from(votes)
-      .where(inArray(votes.suggestionId, suggestionIds))
-      .groupBy(votes.suggestionId, votes.value);
+      .from(picks)
+      .innerJoin(participants, eq(participants.id, picks.participantId))
+      .innerJoin(profiles, eq(profiles.id, participants.userId))
+      .where(inArray(picks.suggestionId, suggestionIds))
+      .orderBy(picks.updatedAt);
 
-    const tallies = new Map<string, VoteTally>();
+    const pickers = new Map<string, PickerView[]>();
     for (const row of rows) {
-      const tally = tallies.get(row.suggestionId) ?? { up: 0, down: 0, veto: 0, total: 0 };
-      if (row.value === 'up' || row.value === 'down' || row.value === 'veto') {
-        tally[row.value] += row.count;
-      }
-      tally.total += row.count;
-      tallies.set(row.suggestionId, tally);
+      const list = pickers.get(row.suggestionId) ?? [];
+      list.push({
+        userId: row.userId,
+        displayName: row.displayName,
+        avatarUrl: row.avatarUrl ?? undefined,
+      });
+      pickers.set(row.suggestionId, list);
     }
 
-    return tallies;
+    return pickers;
   }
 }

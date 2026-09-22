@@ -14,6 +14,6 @@ export class UpdateProfileDto extends createZodDto(
       defaultTravelMode: z.enum(['two_wheeler', 'drive', 'walk', 'transit']).optional(),
     })
     .refine((value) => Object.keys(value).length > 0, {
-      message: 'Cần ít nhất một trường để cập nhật',
+      message: 'Provide at least one field to update',
     }),
 ) {}

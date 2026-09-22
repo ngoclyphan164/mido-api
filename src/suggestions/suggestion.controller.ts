@@ -27,7 +27,9 @@ export class SuggestionController {
    * `total` bằng 0 mới được `POST :id/suggest`, vì đó mới là request tính tiền.
    */
   @Get(':id/suggestions')
-  @ApiOperation({ summary: 'Một trang gợi ý đã lưu, kèm tally vote và tổng số option' })
+  @ApiOperation({
+    summary: 'Một trang gợi ý đã lưu, kèm người đã tick từng quán và tổng số option',
+  })
   listSuggestions(
     @Param() params: HangoutIdParamsDto,
     @Query() query: StoredSuggestionsQueryDto,
@@ -38,7 +40,7 @@ export class SuggestionController {
 
   /** Một option cụ thể — màn chi tiết không phải đoán nó nằm ở trang nào. */
   @Get(':id/suggestions/:suggestionId')
-  @ApiOperation({ summary: 'Một gợi ý đã lưu, kèm tally vote' })
+  @ApiOperation({ summary: 'Một gợi ý đã lưu, kèm người đã tick' })
   getSuggestion(@Param() params: StoredSuggestionParamsDto, @CurrentUser() user: AuthUser) {
     return this.snapshots.getForMember(params.id, params.suggestionId, user.id);
   }

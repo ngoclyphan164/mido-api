@@ -22,14 +22,14 @@ export class CronSecretGuard implements CanActivate {
     const secret = this.config.get<string>('CRON_SECRET');
 
     if (!secret) {
-      this.logger.error('CRON_SECRET chưa được cấu hình — chặn mọi request cron');
-      throw new UnauthorizedException('Cron chưa được cấu hình');
+      this.logger.error('CRON_SECRET is not configured — rejecting every cron request');
+      throw new UnauthorizedException('Cron is not configured');
     }
 
     const header = context.switchToHttp().getRequest<Request>().headers.authorization;
 
     if (header !== `Bearer ${secret}`) {
-      throw new UnauthorizedException('Cron secret không đúng');
+      throw new UnauthorizedException('Invalid cron secret');
     }
 
     return true;

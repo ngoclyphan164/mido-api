@@ -17,7 +17,7 @@ const searchLocationQuerySchema = z
       context.addIssue({
         code: 'custom',
         path: hasLat ? ['lng'] : ['lat'],
-        message: 'lat và lng phải được gửi cùng nhau',
+        message: 'lat and lng must be sent together',
       });
     }
 
@@ -25,7 +25,7 @@ const searchLocationQuerySchema = z
       context.addIssue({
         code: 'custom',
         path: ['radiusMeters'],
-        message: 'radiusMeters chỉ dùng được khi có lat và lng',
+        message: 'radiusMeters can only be used together with lat and lng',
       });
     }
   });

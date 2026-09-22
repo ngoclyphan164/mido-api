@@ -1,35 +1,38 @@
 import { NotFoundException } from '@nestjs/common';
 import { describe, expect, it, vi } from 'vitest';
 
-import type { VoteRepository } from './vote.repository';
-import { VoteService } from './vote.service';
+import type { PickRepository } from './pick.repository';
+import { PickService } from './pick.service';
 
-describe('VoteService', () => {
-  it('trả vote mới nhất và tally từ repository', async () => {
-    const result = {
-      vote: {
-        id: 'vote-id',
-        suggestionId: 'suggestion-id',
-        participantId: 'participant-id',
-        value: 'up' as const,
-        updatedAt: new Date('2026-08-24T13:00:00Z'),
-      },
-      tally: { up: 2, down: 1, veto: 0, total: 3 },
+describe('PickService', () => {
+  it('trả lựa chọn vừa ghi từ repository', async () => {
+    const pick = {
+      suggestionId: 'suggestion-id',
+      participantId: 'participant-id',
+      updatedAt: new Date('2026-09-22T13:00:00Z'),
     };
-    const castVote = vi.fn().mockResolvedValue(result);
-    const service = new VoteService({ castVote } as unknown as VoteRepository);
+    const setPick = vi.fn().mockResolvedValue(pick);
+    const service = new PickService({ setPick } as unknown as PickRepository);
 
-    await expect(service.castVote('suggestion-id', 'user-id', 'up')).resolves.toBe(result);
-    expect(castVote).toHaveBeenCalledWith('suggestion-id', 'user-id', 'up');
+    await expect(service.setPick('hangout-id', 'user-id', 'suggestion-id')).resolves.toBe(pick);
+    expect(setPick).toHaveBeenCalledWith('hangout-id', 'user-id', 'suggestion-id');
   });
 
-  it('không tiết lộ suggestion nếu user không phải participant', async () => {
-    const service = new VoteService({
-      castVote: vi.fn().mockResolvedValue(undefined),
-    } as unknown as VoteRepository);
+  it('không tiết lộ suggestion nếu user chưa phải participant', async () => {
+    const service = new PickService({
+      setPick: vi.fn().mockResolvedValue(undefined),
+    } as unknown as PickRepository);
 
-    await expect(service.castVote('suggestion-id', 'outsider-id', 'veto')).rejects.toBeInstanceOf(
-      NotFoundException,
-    );
+    await expect(
+      service.setPick('hangout-id', 'outsider-id', 'suggestion-id'),
+    ).rejects.toBeInstanceOf(NotFoundException);
+  });
+
+  it('coi việc bỏ tick khi chưa chọn gì là thành công', async () => {
+    const clearPick = vi.fn().mockResolvedValue(false);
+    const service = new PickService({ clearPick } as unknown as PickRepository);
+
+    await expect(service.clearPick('hangout-id', 'user-id')).resolves.toBeUndefined();
+    expect(clearPick).toHaveBeenCalledWith('hangout-id', 'user-id');
   });
 });

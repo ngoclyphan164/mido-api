@@ -1,7 +1,7 @@
 import { BadGatewayException, Injectable } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 
-const DELETE_ACCOUNT_ERROR = 'Chưa thể xóa tài khoản lúc này. Vui lòng thử lại.';
+const DELETE_ACCOUNT_ERROR = 'Could not delete the account right now. Please try again.';
 
 /** Server-only wrapper around Supabase Auth Admin API. */
 @Injectable()

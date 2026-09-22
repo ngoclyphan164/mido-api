@@ -73,7 +73,7 @@ export function validateEnv(raw: Record<string, unknown>): Env {
     const issues = parsed.error.issues
       .map((issue) => `  - ${issue.path.join('.') || '(root)'}: ${issue.message}`)
       .join('\n');
-    throw new Error(`Biến môi trường không hợp lệ:\n${issues}`);
+    throw new Error(`Invalid environment variables:\n${issues}`);
   }
 
   return parsed.data;

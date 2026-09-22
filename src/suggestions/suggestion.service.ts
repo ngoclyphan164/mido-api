@@ -51,7 +51,7 @@ type SuggestionView = {
   location: PlaceCandidate['location'];
   primaryType?: string;
   types: string[];
-  /** `types` đã dịch sang tiếng Việt để client render tag, `primaryType` đứng đầu. */
+  /** `types` là nhãn tiếng Anh để client render tag, `primaryType` đứng đầu. */
   primaryTypeLabel?: string;
   typeLabels: string[];
   rating?: number;
@@ -118,7 +118,8 @@ export class SuggestionService {
     options: SuggestOptions,
   ): Promise<SuggestionResponse> {
     const context = await this.repository.loadContext(hangoutId, userId);
-    if (!context) throw new NotFoundException('Không tìm thấy kèo hoặc bạn không thuộc nhóm này');
+    if (!context)
+      throw new NotFoundException('Hangout not found, or you are not a member of its group');
     this.assertSuggestable(context);
 
     const participantWeights = context.participants.map((participant) =>
@@ -135,9 +136,7 @@ export class SuggestionService {
 
     const includedTypes = placeTypesForActivity(context.activityType);
     if (!includedTypes) {
-      throw new UnprocessableEntityException(
-        `Activity type chưa được hỗ trợ: ${context.activityType}`,
-      );
+      throw new UnprocessableEntityException(`Unsupported activity type: ${context.activityType}`);
     }
 
     try {
@@ -201,7 +200,7 @@ export class SuggestionService {
       const suggestions = selected.map(({ scored, candidate }, index) => {
         const suggestionId = suggestionIds.get(scored.id);
         if (!suggestionId) {
-          throw new Error(`Không persist được suggestion option cho ${scored.id}`);
+          throw new Error(`Could not persist the suggestion option for ${scored.id}`);
         }
         return this.toSuggestion(
           candidate.evaluatedPlace,
@@ -242,10 +241,10 @@ export class SuggestionService {
       context.status === 'done' ||
       context.status === 'cancelled'
     ) {
-      throw new ConflictException(`Không thể suggest khi kèo đang ở trạng thái ${context.status}`);
+      throw new ConflictException(`Cannot suggest while the hangout has status ${context.status}`);
     }
     if (context.participants.length < 2 || context.participants.length > 10) {
-      throw new UnprocessableEntityException('Kèo cần từ 2 đến 10 người tham gia');
+      throw new UnprocessableEntityException('A hangout needs between 2 and 10 participants');
     }
   }
 
@@ -340,7 +339,7 @@ export class SuggestionService {
       );
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
-      this.logger.error(`Không lưu được snapshot gợi ý: ${message}`);
+      this.logger.error(`Could not store the suggestion snapshot: ${message}`);
     }
   }
 
@@ -470,16 +469,21 @@ export class SuggestionService {
       // Payload của Google có thể chứa chi tiết key/project — chỉ log, không trả client.
       this.logger.error(`Google Maps HTTP ${error.status}: ${error.message}`);
       if (error.status === 401 || error.status === 403) {
-        throw new ServiceUnavailableException('Provider bản đồ chưa được cấp quyền cho API này');
+        throw new ServiceUnavailableException(
+          'The map provider has not granted access to this API',
+        );
       }
       if (error.status === 429) {
-        throw new HttpException('Provider bản đồ đang bị giới hạn', HttpStatus.TOO_MANY_REQUESTS);
+        throw new HttpException(
+          'The map provider is rate limiting us',
+          HttpStatus.TOO_MANY_REQUESTS,
+        );
       }
-      throw new BadGatewayException('Provider bản đồ trả về lỗi');
+      throw new BadGatewayException('The map provider returned an error');
     }
     if (error instanceof ZodError) {
-      this.logger.error(`Google Maps payload không hợp lệ: ${error.message}`);
-      throw new BadGatewayException('Provider bản đồ trả về lỗi');
+      this.logger.error(`Invalid Google Maps payload: ${error.message}`);
+      throw new BadGatewayException('The map provider returned an error');
     }
     throw error;
   }

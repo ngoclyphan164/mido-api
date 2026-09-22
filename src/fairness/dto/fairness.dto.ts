@@ -25,7 +25,7 @@ export class CompleteHangoutDto extends createZodDto(
           if (seen.has(travelTime.participantId)) {
             context.addIssue({
               code: 'custom',
-              message: 'participantId không được trùng',
+              message: 'participantId must be unique',
               path: [index, 'participantId'],
             });
           }

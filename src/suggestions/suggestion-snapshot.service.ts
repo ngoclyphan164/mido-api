@@ -10,7 +10,7 @@ import {
   SuggestionSnapshotRepository,
   type StoredTravelTime,
   type SuggestionSnapshotRow,
-  type VoteTally,
+  type PickerView,
 } from './suggestion-snapshot.repository';
 
 /**
@@ -47,7 +47,8 @@ export type StoredSuggestionView = {
   score?: number;
   scoreBreakdown?: unknown;
   travelTimes: StoredTravelTime[];
-  tally?: VoteTally;
+  /** Ai đã tick chọn quán này. Rỗng thì bỏ hẳn field. */
+  pickedBy?: PickerView[];
   /** Khi nào nội dung này được đọc từ provider. */
   fetchedAt: string;
 };
@@ -81,7 +82,7 @@ export class SuggestionSnapshotService {
     limit = 5,
   ): Promise<StoredSuggestionPage> {
     if (!(await this.repository.isHangoutMember(hangoutId, userId))) {
-      throw new NotFoundException('Không tìm thấy kèo hoặc bạn không thuộc nhóm này');
+      throw new NotFoundException('Hangout not found, or you are not a member of its group');
     }
     return this.listForHangout(hangoutId, offset, limit);
   }
@@ -96,21 +97,21 @@ export class SuggestionSnapshotService {
     userId: string,
   ): Promise<StoredSuggestionView> {
     if (!(await this.repository.isHangoutMember(hangoutId, userId))) {
-      throw new NotFoundException('Không tìm thấy kèo hoặc bạn không thuộc nhóm này');
+      throw new NotFoundException('Hangout not found, or you are not a member of its group');
     }
 
     const row = await this.repository.findBySuggestion(suggestionId);
     if (!row || row.hangoutId !== hangoutId) {
-      throw new NotFoundException('Không tìm thấy gợi ý này trong kèo');
+      throw new NotFoundException('Suggestion not found in this hangout');
     }
 
-    const tallies = await this.repository.tallies([suggestionId]);
-    return this.toView(row, tallies.get(suggestionId));
+    const pickers = await this.repository.pickers([suggestionId]);
+    return this.toView(row, pickers.get(suggestionId));
   }
 
   /**
-   * Danh sách option đã lưu của một kèo, kèm tally. Không bao giờ throw: đây là
-   * đường đọc lại, hỏng thì client quay về gọi `/suggest`.
+   * Danh sách option đã lưu của một kèo, kèm người đã tick từng quán. Không
+   * bao giờ throw: đây là đường đọc lại, hỏng thì client quay về gọi `/suggest`.
    */
   async listForHangout(hangoutId: string, offset = 0, limit = 5): Promise<StoredSuggestionPage> {
     try {
@@ -123,20 +124,22 @@ export class SuggestionSnapshotService {
         };
       }
 
-      const [tallies, total] = await Promise.all([
-        this.repository.tallies(rows.map((row) => row.suggestionId)),
+      const [pickers, total] = await Promise.all([
+        this.repository.pickers(rows.map((row) => row.suggestionId)),
         this.repository.countActiveForHangout(hangoutId),
       ]);
 
       return {
         suggestions: await Promise.all(
-          rows.map((row) => this.toView(row, tallies.get(row.suggestionId))),
+          rows.map((row) => this.toView(row, pickers.get(row.suggestionId))),
         ),
         total,
         offset,
       };
     } catch (error) {
-      this.logger.error(`Không đọc được gợi ý đã lưu của kèo ${hangoutId}: ${this.reason(error)}`);
+      this.logger.error(
+        `Could not read stored suggestions for hangout ${hangoutId}: ${this.reason(error)}`,
+      );
       return { suggestions: [], total: 0, offset };
     }
   }
@@ -157,7 +160,7 @@ export class SuggestionSnapshotService {
       return captured ? await this.toView(captured) : undefined;
     } catch (error) {
       this.logger.error(
-        `Không đọc được địa điểm đã chốt của kèo ${hangoutId}: ${this.reason(error)}`,
+        `Could not read the decided place for hangout ${hangoutId}: ${this.reason(error)}`,
       );
       return undefined;
     }
@@ -178,7 +181,7 @@ export class SuggestionSnapshotService {
 
       const details = await this.detailsProvider.getDetails(ref.externalPlaceId);
       if (!details) {
-        this.logger.warn(`Không chụp được snapshot địa điểm cho kèo ${hangoutId}`);
+        this.logger.warn(`Could not capture a place snapshot for hangout ${hangoutId}`);
         return undefined;
       }
 
@@ -205,7 +208,7 @@ export class SuggestionSnapshotService {
       return await this.repository.findChosenForHangout(hangoutId);
     } catch (error) {
       this.logger.error(
-        `Không ghi được snapshot địa điểm cho kèo ${hangoutId}: ${this.reason(error)}`,
+        `Could not store the place snapshot for hangout ${hangoutId}: ${this.reason(error)}`,
       );
       return undefined;
     }
@@ -213,7 +216,7 @@ export class SuggestionSnapshotService {
 
   private async toView(
     row: SuggestionSnapshotRow,
-    tally?: VoteTally,
+    pickedBy?: PickerView[],
   ): Promise<StoredSuggestionView> {
     const typeLabels = placeTypeLabels(row.types, row.primaryType ?? undefined);
     return {
@@ -236,7 +239,7 @@ export class SuggestionSnapshotService {
       score: row.score === null ? undefined : Number(row.score),
       scoreBreakdown: row.scoreBreakdown ?? undefined,
       travelTimes: Array.isArray(row.travelTimes) ? (row.travelTimes as StoredTravelTime[]) : [],
-      tally,
+      pickedBy: pickedBy?.length ? pickedBy : undefined,
       fetchedAt: row.fetchedAt.toISOString(),
     };
   }

@@ -46,7 +46,7 @@ export class AllExceptionsFilter implements ExceptionFilter {
     if (exception instanceof ZodError) {
       return {
         statusCode: HttpStatus.BAD_REQUEST,
-        message: 'Dữ liệu gửi lên không hợp lệ',
+        message: 'The submitted payload is invalid',
         error: 'ValidationError',
         details: exception.issues,
         path,
@@ -75,7 +75,7 @@ export class AllExceptionsFilter implements ExceptionFilter {
 
     return {
       statusCode: HttpStatus.INTERNAL_SERVER_ERROR,
-      message: 'Lỗi hệ thống',
+      message: 'Internal server error',
       error: 'InternalServerError',
       path,
       timestamp,

@@ -26,22 +26,22 @@ export class FairnessService {
         await this.snapshots.captureChosen(hangoutId);
         return { outing: result.outing };
       case 'not_found':
-        throw new NotFoundException('Không tìm thấy kèo hoặc bạn không thuộc nhóm này');
+        throw new NotFoundException('Hangout not found, or you are not a member of its group');
       case 'forbidden':
-        throw new ForbiddenException('Chỉ owner hoặc admin mới được chốt địa điểm');
+        throw new ForbiddenException('Only a group owner or admin can decide the place');
       case 'invalid_suggestion':
         throw new UnprocessableEntityException(
-          'Suggestion không thuộc kèo này hoặc không còn active',
+          'Suggestion does not belong to this hangout, or is no longer active',
         );
       case 'conflict':
-        throw new ConflictException('Kèo đã được chốt, hoàn tất hoặc huỷ');
+        throw new ConflictException('This hangout is already decided, completed or cancelled');
     }
   }
 
   async complete(hangoutId: string, userId: string, body: CompleteHangoutDto) {
     const happenedAt = body.happenedAt ? new Date(body.happenedAt) : new Date();
     if (happenedAt.getTime() > Date.now() + 5 * 60_000) {
-      throw new UnprocessableEntityException('happenedAt không được nằm trong tương lai');
+      throw new UnprocessableEntityException('happenedAt cannot be in the future');
     }
 
     const result = await this.repository.complete(
@@ -58,23 +58,25 @@ export class FairnessService {
           ledger: result.ledger,
         };
       case 'not_found':
-        throw new NotFoundException('Không tìm thấy kèo hoặc bạn không thuộc nhóm này');
+        throw new NotFoundException('Hangout not found, or you are not a member of its group');
       case 'forbidden':
-        throw new ForbiddenException('Chỉ owner hoặc admin mới được hoàn tất kèo');
+        throw new ForbiddenException('Only a group owner or admin can complete the hangout');
       case 'not_decided':
-        throw new ConflictException('Kèo chưa được chốt địa điểm');
+        throw new ConflictException('This hangout has no decided place yet');
       case 'participant_mismatch':
         throw new UnprocessableEntityException(
-          'actualTravelTimes phải chứa đúng toàn bộ participant của kèo',
+          'actualTravelTimes must cover exactly every participant of the hangout',
         );
       case 'already_completed':
-        throw new ConflictException('Kèo đã hoàn tất với thời gian thực tế khác');
+        throw new ConflictException(
+          'This hangout was already completed with different actual travel times',
+        );
     }
   }
 
   async getGroupFairness(groupId: string, userId: string) {
     const result = await this.repository.getGroupFairness(groupId, userId);
-    if (!result) throw new NotFoundException('Không tìm thấy nhóm hoặc bạn không thuộc nhóm này');
+    if (!result) throw new NotFoundException('Group not found, or you are not a member of it');
     return result;
   }
 }

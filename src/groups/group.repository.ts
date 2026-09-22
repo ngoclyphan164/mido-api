@@ -83,7 +83,7 @@ export class GroupRepository {
       }
     }
 
-    throw new Error('Không sinh được invite code sau nhiều lần thử');
+    throw new Error('Could not generate an invite code after several attempts');
   }
 
   async listForUser(userId: string): Promise<GroupView[]> {
@@ -245,7 +245,7 @@ export class GroupRepository {
       }
     }
 
-    throw new Error('Không sinh được invite code sau nhiều lần thử');
+    throw new Error('Could not generate an invite code after several attempts');
   }
 
   private async findMemberRole(groupId: string, userId: string): Promise<GroupRole | undefined> {

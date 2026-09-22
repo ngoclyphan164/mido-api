@@ -28,14 +28,14 @@ export class SupabaseJwtGuard implements CanActivate {
     const accessToken = this.readBearerToken(request.headers.authorization);
 
     if (!accessToken) {
-      throw new UnauthorizedException('Thiếu Bearer access token');
+      throw new UnauthorizedException('Missing Bearer access token');
     }
 
     try {
       request.authUser = await this.verifier.verify(accessToken);
       return true;
     } catch {
-      throw new UnauthorizedException('Access token không hợp lệ hoặc đã hết hạn');
+      throw new UnauthorizedException('Access token is invalid or has expired');
     }
   }
 

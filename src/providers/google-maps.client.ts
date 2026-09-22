@@ -3,7 +3,7 @@ import { ConfigService } from '@nestjs/config';
 
 export class GoogleMapsConfigurationError extends Error {
   constructor() {
-    super('GOOGLE_MAPS_API_KEY chưa được cấu hình');
+    super('GOOGLE_MAPS_API_KEY is not configured');
     this.name = 'GoogleMapsConfigurationError';
   }
 }

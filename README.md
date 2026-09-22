@@ -75,7 +75,7 @@ src/
 ├── providers/       # HTTP clients, grid 250m và policy dùng chung
 ├── routing/         # Google Route Matrix provider
 ├── suggestions/     # /suggest pipeline, activity/filtering và DB repository
-├── votes/           # upsert vote API + tally; realtime đọc từ Supabase
+├── picks/           # tick chọn quán (1 người 1 quán); realtime đọc từ Supabase
 └── health/
 ```
 
@@ -126,19 +126,19 @@ chỉ và `location { lat, lng }` để client đặt pin ngay, kèm `attributio
 ### Place type hiển thị
 
 Google trả place type dạng key (`coffee_shop`, `shopping_mall`, `point_of_interest`). Cả
-`/v1/places/search` lẫn `/suggest` trả thêm `typeLabels` và `primaryTypeLabel` đã dịch sang tiếng
-Việt, `primaryType` đứng đầu danh sách:
+`/v1/places/search` lẫn `/suggest` trả thêm `typeLabels` và `primaryTypeLabel` là nhãn tiếng Anh
+đọc được, `primaryType` đứng đầu danh sách:
 
 ```json
 {
   "primaryType": "cafe",
   "types": ["cafe", "coffee_shop", "food", "point_of_interest"],
-  "primaryTypeLabel": "Quán cà phê",
-  "typeLabels": ["Quán cà phê"]
+  "primaryTypeLabel": "Café",
+  "typeLabels": ["Café"]
 }
 ```
 
-Bảng dịch nằm ở `src/places/place-types.ts`. Type chung chung (`point_of_interest`, `establishment`,
+Bảng nhãn nằm ở `src/places/place-types.ts`. Type chung chung (`point_of_interest`, `establishment`,
 `food`) và nhãn hành chính của Geocoding bị loại hẳn; type Google mới thêm mà bảng chưa có thì được
 viết hoa lại (`pickleball_court` → `Pickleball court`) để UI không bao giờ lòi snake_case. Trường
 `types` gốc vẫn giữ nguyên cho client nào cần lọc theo key.
@@ -166,15 +166,16 @@ DELETE /v1/hangouts/:hangoutId
 ```
 
 Owner/admin được đổi tên nhóm; chỉ owner được xóa nhóm. Xóa nhóm là HTTP 204 và cascade toàn bộ
-membership, kèo, vote, outing và fairness ledger thuộc nhóm trong cùng câu lệnh database. Với kèo,
-creator hoặc owner/admin được quản lý. Chỉ kèo `draft`/`voting` được sửa; kèo `decided`/`done` trả
+membership, kèo, lựa chọn, outing và fairness ledger thuộc nhóm trong cùng câu lệnh database. Với kèo,
+mọi thành viên trong nhóm đều sửa và xóa được — kèo là của cả nhóm, không của riêng người tạo; người
+ngoài nhóm nhận 404 chứ không phải 403. Chỉ kèo `draft`/`voting` được sửa; kèo `decided`/`done` trả
 409 khi sửa hoặc xóa để không làm mất lịch sử outing/fairness. Gửi `budgetMax: null` để bỏ giới hạn
 ngân sách. DELETE thành công trả HTTP 204.
 
 ## Xóa tài khoản
 
 `DELETE /v1/auth/me` xóa vĩnh viễn Supabase Auth user hiện tại. Foreign key cascade đồng thời xóa
-profile, nhóm/kèo do người đó tạo, membership, vị trí, participant, vote và fairness ledger liên
+profile, nhóm/kèo do người đó tạo, membership, vị trí, participant, lựa chọn và fairness ledger liên
 quan. Outing chung vẫn được giữ nhưng `decided_by` được đặt `NULL` để không còn liên kết nhận dạng.
 Route chấp nhận cả tài khoản email và anonymous account, trả HTTP 204 khi hoàn tất.
 
@@ -201,8 +202,8 @@ Mỗi suggestion luôn có:
   "id": "provider-place-id",
   "suggestionId": "stable-option-uuid",
   "provider": "google_maps",
-  "primaryTypeLabel": "Quán cà phê",
-  "typeLabels": ["Quán cà phê"],
+  "primaryTypeLabel": "Café",
+  "typeLabels": ["Café"],
   "images": ["https://lh3.googleusercontent.com/..."],
   "mapsUri": "https://maps.google.com/?cid=...",
   "score": 0.82,
@@ -239,32 +240,41 @@ provider/license cho phép lưu snapshot trước khi bật retry trong producti
 cũ**, trong khi vẫn tốn 1 Nearby Search + Route Matrix + `topN` Place Photo. Đừng map nút "suggest
 lại" thành một request mới.
 
-Cách đúng: xin `topN: 20` một lần, đọc lại qua `GET :id/suggestions`, rồi mỗi lần bấm thì hiện 5
-option kế tiếp và quay vòng khi hết. Cả 20 option đều được persist với `isActive = true` và có
-`suggestionId` riêng, nên vote đặt ở trang nào cũng hợp lệ và không mất khi xoay vòng.
+Cách đúng: xin `topN: 20` một lần rồi đọc lại qua `GET :id/suggestions?limit=20`. Client hiện cả
+pool trong một danh sách — 20 dòng thì không cần phân trang, và giấu bớt lựa chọn chỉ khiến người
+dùng bấm "tìm lại" tưởng là có quán mới. Cả 20 option đều được persist với `isActive = true` và có
+`suggestionId` riêng, nên tick ở đâu trong pool cũng hợp lệ.
 
 Pool không còn chỉ nằm trong state màn hình: `suggestion_places` giữ nó lại, nên đóng app mở lại
-vẫn xoay vòng được trên đúng 20 quán đó mà không tốn thêm đồng nào.
+vẫn thấy đúng 20 quán đó mà không tốn thêm đồng nào.
 
 Chỉ gọi lại API khi input thực sự đổi — thêm/bớt participant, đổi `plannedAt`, `fairnessMode`,
 `budgetMax`, `timeCapSeconds` hoặc `minimumRating`.
 
-### Vote và Realtime
+### Tick chọn quán và Realtime
 
-Mỗi option trả về có `suggestionId`. Participant tạo hoặc đổi vote qua:
+Không còn vote up/down/veto. **Mỗi thành viên tick đúng một quán cho mỗi kèo**, nên lựa chọn là một
+resource đơn của kèo chứ không phải một hàng gắn vào từng suggestion:
 
 ```http
-POST /v1/suggestions/:suggestionId/votes
+PUT /v1/hangouts/:hangoutId/pick
 Authorization: Bearer <supabase-access-token>
 Content-Type: application/json
 
-{ "value": "up" }
+{ "suggestionId": "..." }
+
+DELETE /v1/hangouts/:hangoutId/pick
 ```
 
-`value` là `up`, `down` hoặc `veto`; response trả vote hiện tại và tally. Database chỉ persist
-provider place ID, rank và trạng thái active, không persist provider content/route duration. Client
-subscribe `postgres_changes` trên `suggestions` và `votes`; RLS chỉ cho authenticated group member
-nhận event. Role client chỉ có SELECT, mọi thao tác ghi vote phải đi qua Nest API.
+`PUT` thay lựa chọn trước nếu có — luật một-người-một-quán nằm ở unique index
+`picks_participant_uidx`, không ở tầng code, nên hai request đua nhau cũng không sinh ra lựa chọn
+thứ hai. `DELETE` là idempotent, trả 204 kể cả khi chưa chọn gì. Người chưa nhập vị trí xuất phát
+thì chưa phải participant và nhận 404.
+
+Database chỉ persist provider place ID, rank và trạng thái active, không persist provider
+content/route duration. Client subscribe `postgres_changes` trên `suggestions` và `picks`; RLS chỉ
+cho authenticated group member nhận event. Role client chỉ có SELECT, mọi thao tác ghi phải đi qua
+Nest API.
 
 ### Snapshot gợi ý
 
@@ -283,7 +293,9 @@ Authorization: Bearer <supabase-access-token>
 
 Nhận `offset` và `limit` (mặc định 0 và 5, trần 20), trả `{ suggestions, total, offset }` theo đúng
 rank lúc suggest. Mỗi phần tử có `name`, `address`, `location`, `typeLabels`, `rating`, `images`,
-`travelTimes`, `score`/`scoreBreakdown` và `tally` vote hiện tại. **Client phải gọi endpoint này
+`travelTimes`, `score`/`scoreBreakdown` và `pickedBy` — danh sách người đã tick quán đó, mỗi người
+gồm `userId`, `displayName` và `avatarUrl`, đủ để client dựng avatar mà không phải gọi thêm.
+**Client phải gọi endpoint này
 trước**; chỉ khi `total` bằng 0 mới được `POST :id/suggest`, vì đó mới là request tính tiền.
 
 `GET /v1/hangouts/:hangoutId/suggestions/:suggestionId` trả đúng một option, để màn chi tiết không

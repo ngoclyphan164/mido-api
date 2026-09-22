@@ -19,7 +19,7 @@ import { PLACES_PROVIDER } from '../src/places/places-provider';
 import { ROUTING_PROVIDER } from '../src/routing/routing-provider';
 import type { RouteMatrixRequest } from '../src/routing/routing-provider';
 import { SuggestionRepository } from '../src/suggestions/suggestion.repository';
-import { VoteRepository } from '../src/votes/vote.repository';
+import { PickRepository } from '../src/picks/pick.repository';
 
 const e2eHangoutId = '68f9bef5-a143-45a5-bab3-4f54e3a216f6';
 const e2eGroupId = 'b1d7b425-e2d2-4a31-82cf-5799985e8278';
@@ -191,23 +191,14 @@ describe('mido-api (e2e)', () => {
           ),
         }),
       })
-      .overrideProvider(VoteRepository)
+      .overrideProvider(PickRepository)
       .useValue({
-        castVote: async (suggestionId: string, _userId: string, value: 'up' | 'down' | 'veto') => ({
-          vote: {
-            id: 'd2175ee8-1c08-44b0-a0f5-726563828f13',
-            suggestionId,
-            participantId: e2eParticipants[0]!.id,
-            value,
-            updatedAt: new Date('2026-08-24T13:00:00Z'),
-          },
-          tally: {
-            up: value === 'up' ? 1 : 0,
-            down: value === 'down' ? 1 : 0,
-            veto: value === 'veto' ? 1 : 0,
-            total: 1,
-          },
+        setPick: async (_hangoutId: string, _userId: string, suggestionId: string) => ({
+          suggestionId,
+          participantId: e2eParticipants[0]!.id,
+          updatedAt: new Date('2026-09-22T13:00:00Z'),
         }),
+        clearPick: async () => true,
       })
       .overrideProvider(FairnessRepository)
       .useValue({
@@ -289,7 +280,7 @@ describe('mido-api (e2e)', () => {
   it('route private bị chặn khi không có Supabase access token', async () => {
     const res = await request(app.getHttpServer()).get('/v1/auth/me').expect(401);
 
-    expect(res.body.message).toBe('Thiếu Bearer access token');
+    expect(res.body.message).toBe('Missing Bearer access token');
   });
 
   it('anonymous Supabase user dùng route private như authenticated user', async () => {
@@ -355,8 +346,8 @@ describe('mido-api (e2e)', () => {
           name: 'Landmark 81',
           location: { lat: 10.7949, lng: 106.7219 },
           // Client render tag từ đây, không phải từ `types` dạng key của Google.
-          primaryTypeLabel: 'Trung tâm thương mại',
-          typeLabels: ['Trung tâm thương mại'],
+          primaryTypeLabel: 'Shopping mall',
+          typeLabels: ['Shopping mall'],
         },
       ],
     });
@@ -439,7 +430,7 @@ describe('mido-api (e2e)', () => {
     expect(res.body).toMatchObject({ status: 'ok', hangoutId: e2eHangoutId });
     expect(res.body.suggestions).toHaveLength(1);
     expect(res.body.suggestions[0].suggestionId).toBe('d89fbb8c-50fd-4d9e-9f18-a046f3709ab1');
-    expect(res.body.suggestions[0].typeLabels).toEqual(['Quán cà phê']);
+    expect(res.body.suggestions[0].typeLabels).toEqual(['Café']);
     expect(res.body.suggestions[0].images).toEqual([
       'https://lh3.googleusercontent.com/e2e-cafe=s800',
     ]);
@@ -475,26 +466,30 @@ describe('mido-api (e2e)', () => {
       .expect(400);
   });
 
-  it('POST /v1/suggestions/:id/votes upsert vote và trả tally', async () => {
+  it('PUT /v1/hangouts/:id/pick ghi lựa chọn của người gọi', async () => {
     const suggestionId = 'd89fbb8c-50fd-4d9e-9f18-a046f3709ab1';
     const res = await request(app.getHttpServer())
-      .post(`/v1/suggestions/${suggestionId}/votes`)
+      .put(`/v1/hangouts/${e2eHangoutId}/pick`)
       .set('Authorization', 'Bearer fixture.jwt')
-      .send({ value: 'veto' })
+      .send({ suggestionId })
       .expect(200);
 
-    expect(res.body).toMatchObject({
-      vote: { suggestionId, value: 'veto' },
-      tally: { up: 0, down: 0, veto: 1, total: 1 },
-    });
+    expect(res.body).toMatchObject({ suggestionId });
   });
 
-  it('POST /v1/suggestions/:id/votes validate vote value bằng Zod', async () => {
+  it('PUT /v1/hangouts/:id/pick validate suggestionId bằng Zod', async () => {
     await request(app.getHttpServer())
-      .post('/v1/suggestions/d89fbb8c-50fd-4d9e-9f18-a046f3709ab1/votes')
+      .put(`/v1/hangouts/${e2eHangoutId}/pick`)
       .set('Authorization', 'Bearer fixture.jwt')
-      .send({ value: 'maybe' })
+      .send({ suggestionId: 'not-a-uuid' })
       .expect(400);
+  });
+
+  it('DELETE /v1/hangouts/:id/pick bỏ tick và trả 204', async () => {
+    await request(app.getHttpServer())
+      .delete(`/v1/hangouts/${e2eHangoutId}/pick`)
+      .set('Authorization', 'Bearer fixture.jwt')
+      .expect(204);
   });
 
   it('POST /v1/hangouts/:id/decide chốt active suggestion', async () => {

@@ -78,16 +78,18 @@ export class PlaceSearchService {
     if (error instanceof GoogleMapsHttpError) {
       this.logger.error(`Google Text Search HTTP ${error.status}: ${error.message}`);
       if (error.status === 401 || error.status === 403) {
-        throw new ServiceUnavailableException('Dịch vụ tìm địa điểm chưa được Google cấp quyền');
+        throw new ServiceUnavailableException(
+          'Google has not granted access to the place search service',
+        );
       }
       if (error.status === 429) {
         throw new HttpException(error.message, HttpStatus.TOO_MANY_REQUESTS);
       }
-      throw new BadGatewayException('Provider bản đồ trả về lỗi');
+      throw new BadGatewayException('The map provider returned an error');
     }
     if (error instanceof ZodError) {
-      this.logger.error(`Google Text Search payload không hợp lệ: ${error.message}`);
-      throw new BadGatewayException('Provider bản đồ trả về lỗi');
+      this.logger.error(`Invalid Google Text Search payload: ${error.message}`);
+      throw new BadGatewayException('The map provider returned an error');
     }
     throw error;
   }

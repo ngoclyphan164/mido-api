@@ -17,7 +17,7 @@ describe('PlaceSearchService', () => {
     const promise = service.search({ q: 'Landmark 81', limit: 5 });
 
     await expect(promise).rejects.toEqual(
-      new ServiceUnavailableException('Dịch vụ tìm địa điểm chưa được Google cấp quyền'),
+      new ServiceUnavailableException('Google has not granted access to the place search service'),
     );
     expect(logError).toHaveBeenCalledWith(expect.stringContaining('HTTP 403'));
   });
@@ -51,8 +51,8 @@ describe('PlaceSearchService', () => {
           location: { lat: 10.7949, lng: 106.7219 },
           primaryType: 'shopping_mall',
           types: ['shopping_mall'],
-          primaryTypeLabel: 'Trung tâm thương mại',
-          typeLabels: ['Trung tâm thương mại'],
+          primaryTypeLabel: 'Shopping mall',
+          typeLabels: ['Shopping mall'],
         },
       ],
     });

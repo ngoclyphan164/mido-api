@@ -23,10 +23,10 @@ export class UpdateSavedLocationDto extends createZodDto(
       address: z.string().trim().min(1).max(512).nullable().optional(),
     })
     .refine((value) => Object.keys(value).length > 0, {
-      message: 'Cần ít nhất một trường để cập nhật',
+      message: 'Provide at least one field to update',
     })
     // Một nửa toạ độ thì không di chuyển được điểm nào cả.
     .refine((value) => (value.lat === undefined) === (value.lng === undefined), {
-      message: 'lat và lng phải gửi cùng nhau',
+      message: 'lat and lng must be sent together',
     }),
 ) {}

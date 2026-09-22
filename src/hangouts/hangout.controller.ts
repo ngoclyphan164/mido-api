@@ -61,7 +61,7 @@ export class HangoutController {
   }
 
   @Patch('hangouts/:id')
-  @ApiOperation({ summary: 'Sửa kèo đang draft/voting; creator hoặc owner/admin' })
+  @ApiOperation({ summary: 'Sửa kèo đang draft/voting; mọi thành viên trong nhóm' })
   update(
     @Param() params: HangoutIdParamsDto,
     @Body() body: UpdateHangoutDto,
@@ -78,7 +78,7 @@ export class HangoutController {
 
   @Delete('hangouts/:id')
   @HttpCode(HttpStatus.NO_CONTENT)
-  @ApiOperation({ summary: 'Xóa kèo chưa chốt; creator hoặc owner/admin' })
+  @ApiOperation({ summary: 'Xóa kèo chưa chốt; mọi thành viên trong nhóm' })
   async remove(@Param() params: HangoutIdParamsDto, @CurrentUser() user: AuthUser): Promise<void> {
     await this.hangouts.remove(params.id, user.id);
   }

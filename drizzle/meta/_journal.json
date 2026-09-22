@@ -92,6 +92,13 @@
       "when": 1789439678937,
       "tag": "0012_avatars_bucket",
       "breakpoints": true
+    },
+    {
+      "idx": 13,
+      "version": "7",
+      "when": 1790071200000,
+      "tag": "0013_picks",
+      "breakpoints": true
     }
   ]
 }

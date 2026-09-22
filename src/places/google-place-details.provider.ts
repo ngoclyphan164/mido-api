@@ -111,7 +111,7 @@ export class GooglePlaceDetailsProvider implements PlaceDetailsProvider {
     } catch (error) {
       if (error instanceof GoogleMapsHttpError && error.status === 404) return undefined;
       const message = error instanceof Error ? error.message : String(error);
-      this.logger.warn(`Không đọc được chi tiết place ${externalPlaceId}: ${message}`);
+      this.logger.warn(`Could not read place details for ${externalPlaceId}: ${message}`);
       return undefined;
     }
   }

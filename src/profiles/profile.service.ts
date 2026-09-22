@@ -36,7 +36,7 @@ export class ProfileService {
     });
 
     const updated = await this.repository.update(user.id, patch);
-    if (!updated) throw new NotFoundException('Không tìm thấy hồ sơ của bạn');
+    if (!updated) throw new NotFoundException('Your profile was not found');
     return updated;
   }
 
@@ -53,7 +53,7 @@ export class ProfileService {
   private assertOwnAvatarUrl(userId: string, avatarUrl: string): void {
     if (!avatarUrl.startsWith(`${this.avatarPrefix}${userId}/`)) {
       throw new UnprocessableEntityException(
-        'Ảnh đại diện phải được tải lên thư mục của chính bạn trong Supabase Storage',
+        'The avatar must be uploaded to your own folder in Supabase Storage',
       );
     }
   }

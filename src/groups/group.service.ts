@@ -16,7 +16,7 @@ export class GroupService {
 
   async detail(groupId: string, userId: string) {
     const group = await this.repository.findDetail(groupId, userId);
-    if (!group) throw new NotFoundException('Không tìm thấy nhóm hoặc bạn không thuộc nhóm này');
+    if (!group) throw new NotFoundException('Group not found, or you are not a member of it');
     return group;
   }
 
@@ -26,9 +26,9 @@ export class GroupService {
       case 'ok':
         return result.group;
       case 'forbidden':
-        throw new ForbiddenException('Chỉ owner hoặc admin mới được sửa nhóm');
+        throw new ForbiddenException('Only a group owner or admin can edit the group');
       case 'not_found':
-        throw new NotFoundException('Không tìm thấy nhóm hoặc bạn không thuộc nhóm này');
+        throw new NotFoundException('Group not found, or you are not a member of it');
     }
   }
 
@@ -38,9 +38,9 @@ export class GroupService {
       case 'ok':
         return;
       case 'forbidden':
-        throw new ForbiddenException('Chỉ owner mới được xóa nhóm');
+        throw new ForbiddenException('Only the group owner can delete the group');
       case 'not_found':
-        throw new NotFoundException('Không tìm thấy nhóm hoặc bạn không thuộc nhóm này');
+        throw new NotFoundException('Group not found, or you are not a member of it');
     }
   }
 
@@ -50,9 +50,9 @@ export class GroupService {
       case 'ok':
         return { group: result.group, alreadyMember: result.alreadyMember };
       case 'expired':
-        throw new GoneException('Link mời đã hết hiệu lực, xin chủ nhóm tạo link mới');
+        throw new GoneException('This invite link has expired; ask the group owner for a new one');
       case 'not_found':
-        throw new NotFoundException('Mã mời không đúng');
+        throw new NotFoundException('Invalid invite code');
     }
   }
 
@@ -62,9 +62,9 @@ export class GroupService {
       case 'ok':
         return { inviteCode: result.inviteCode, inviteExpiresAt: result.inviteExpiresAt };
       case 'forbidden':
-        throw new ForbiddenException('Chỉ owner hoặc admin mới được tạo link mời mới');
+        throw new ForbiddenException('Only a group owner or admin can create a new invite link');
       case 'not_found':
-        throw new NotFoundException('Không tìm thấy nhóm hoặc bạn không thuộc nhóm này');
+        throw new NotFoundException('Group not found, or you are not a member of it');
     }
   }
 }

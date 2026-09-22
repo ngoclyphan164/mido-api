@@ -84,21 +84,23 @@ export type HangoutDetailView = Omit<HangoutSummaryView, 'participantCount'> & {
   } | null;
 };
 
+/**
+ * Neither result carries `forbidden`: any member of the group may edit and
+ * delete its hangouts. A plan belongs to the group rather than to whoever
+ * happened to type it in, and a member who cannot move the time by an hour
+ * just asks someone else to — the same edit, only slower.
+ *
+ * Membership is still enforced, by the inner join in `findStatusForMember`:
+ * a non-member gets `not_found`, which deliberately declines to confirm that
+ * the hangout exists at all.
+ */
 export type UpdateHangoutResult =
   | { kind: 'ok'; hangout: HangoutDetailView }
-  | { kind: 'not_found' | 'forbidden' }
+  | { kind: 'not_found' }
   | { kind: 'immutable'; status: HangoutStatus };
 
 export type DeleteHangoutResult =
-  | { kind: 'ok' }
-  | { kind: 'not_found' | 'forbidden' }
-  | { kind: 'immutable'; status: HangoutStatus };
-
-type HangoutManagementAccess = {
-  createdBy: string;
-  role: 'owner' | 'admin' | 'member';
-  status: HangoutStatus;
-};
+  { kind: 'ok' } | { kind: 'not_found' } | { kind: 'immutable'; status: HangoutStatus };
 
 const originLat = geographyLat(participants.origin);
 const originLng = geographyLng(participants.origin);
@@ -261,11 +263,10 @@ export class HangoutRepository {
     userId: string,
     input: UpdateHangoutInput,
   ): Promise<UpdateHangoutResult> {
-    const access = await this.findManagementAccess(hangoutId, userId);
-    if (!access) return { kind: 'not_found' };
-    if (!this.canManage(access, userId)) return { kind: 'forbidden' };
-    if (access.status !== 'draft' && access.status !== 'voting') {
-      return { kind: 'immutable', status: access.status };
+    const status = await this.findStatusForMember(hangoutId, userId);
+    if (!status) return { kind: 'not_found' };
+    if (status !== 'draft' && status !== 'voting') {
+      return { kind: 'immutable', status };
     }
 
     const [updated] = await this.database.db
@@ -281,8 +282,8 @@ export class HangoutRepository {
       .where(and(eq(hangouts.id, hangoutId), inArray(hangouts.status, ['draft', 'voting'])))
       .returning({ id: hangouts.id });
     if (!updated) {
-      const latest = await this.findManagementAccess(hangoutId, userId);
-      return latest ? { kind: 'immutable', status: latest.status } : { kind: 'not_found' };
+      const latest = await this.findStatusForMember(hangoutId, userId);
+      return latest ? { kind: 'immutable', status: latest } : { kind: 'not_found' };
     }
 
     const hangout = await this.findDetail(hangoutId, userId);
@@ -291,11 +292,10 @@ export class HangoutRepository {
   }
 
   async remove(hangoutId: string, userId: string): Promise<DeleteHangoutResult> {
-    const access = await this.findManagementAccess(hangoutId, userId);
-    if (!access) return { kind: 'not_found' };
-    if (!this.canManage(access, userId)) return { kind: 'forbidden' };
-    if (access.status === 'decided' || access.status === 'done') {
-      return { kind: 'immutable', status: access.status };
+    const status = await this.findStatusForMember(hangoutId, userId);
+    if (!status) return { kind: 'not_found' };
+    if (status === 'decided' || status === 'done') {
+      return { kind: 'immutable', status };
     }
 
     const [deleted] = await this.database.db
@@ -306,8 +306,8 @@ export class HangoutRepository {
       .returning({ id: hangouts.id });
     if (deleted) return { kind: 'ok' };
 
-    const latest = await this.findManagementAccess(hangoutId, userId);
-    return latest ? { kind: 'immutable', status: latest.status } : { kind: 'not_found' };
+    const latest = await this.findStatusForMember(hangoutId, userId);
+    return latest ? { kind: 'immutable', status: latest } : { kind: 'not_found' };
   }
 
   /**
@@ -395,16 +395,22 @@ export class HangoutRepository {
     };
   }
 
-  private async findManagementAccess(
+  /**
+   * The hangout's status, but only for someone in its group — the inner join
+   * is the whole authorization check for editing and deleting. `undefined`
+   * covers both "no such hangout" and "not your group", and the callers turn
+   * that into 404 either way so the two stay indistinguishable from outside.
+   *
+   * Neither the creator nor the caller's role is selected any more: every
+   * member gets the same rights over a hangout, so there is nothing left to
+   * compare them against.
+   */
+  private async findStatusForMember(
     hangoutId: string,
     userId: string,
-  ): Promise<HangoutManagementAccess | undefined> {
-    const [access] = await this.database.db
-      .select({
-        createdBy: hangouts.createdBy,
-        role: groupMembers.role,
-        status: hangouts.status,
-      })
+  ): Promise<HangoutStatus | undefined> {
+    const [row] = await this.database.db
+      .select({ status: hangouts.status })
       .from(hangouts)
       .innerJoin(
         groupMembers,
@@ -412,10 +418,6 @@ export class HangoutRepository {
       )
       .where(eq(hangouts.id, hangoutId))
       .limit(1);
-    return access;
-  }
-
-  private canManage(access: HangoutManagementAccess, userId: string): boolean {
-    return access.createdBy === userId || access.role === 'owner' || access.role === 'admin';
+    return row?.status;
   }
 }

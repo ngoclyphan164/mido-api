@@ -50,15 +50,23 @@ function serviceWith(
 }
 
 describe('SuggestionSnapshotService', () => {
-  it('trả lại gợi ý đã lưu kèm travel time và tally, không gọi provider nào', async () => {
+  it('trả lại gợi ý đã lưu kèm travel time và người đã tick, không gọi provider nào', async () => {
     const searchNearby = vi.fn();
     const service = serviceWith(
       {
         listActiveForHangout: vi.fn().mockResolvedValue([row]),
         countActiveForHangout: vi.fn().mockResolvedValue(20),
-        tallies: vi
-          .fn()
-          .mockResolvedValue(new Map([['suggestion-id', { up: 2, down: 0, veto: 0, total: 2 }]])),
+        pickers: vi.fn().mockResolvedValue(
+          new Map([
+            [
+              'suggestion-id',
+              [
+                { userId: 'user-1', displayName: 'Linh' },
+                { userId: 'user-2', displayName: 'Minh', avatarUrl: 'https://cdn/a.jpg' },
+              ],
+            ],
+          ]),
+        ),
         savePhotoUri: vi.fn(),
       },
       {},
@@ -72,11 +80,14 @@ describe('SuggestionSnapshotService', () => {
         {
           suggestionId: 'suggestion-id',
           name: 'Cà phê Fixture',
-          typeLabels: ['Quán cà phê'],
+          typeLabels: ['Café'],
           rating: 4.6,
           score: 0.8125,
           travelTimes: [expect.objectContaining({ name: 'Linh', durationSec: 720 })],
-          tally: { up: 2, down: 0, veto: 0, total: 2 },
+          pickedBy: [
+            { userId: 'user-1', displayName: 'Linh' },
+            { userId: 'user-2', displayName: 'Minh', avatarUrl: 'https://cdn/a.jpg' },
+          ],
         },
       ],
     });
@@ -95,7 +106,7 @@ describe('SuggestionSnapshotService', () => {
           },
         ]),
         countActiveForHangout: vi.fn().mockResolvedValue(1),
-        tallies: vi.fn().mockResolvedValue(new Map()),
+        pickers: vi.fn().mockResolvedValue(new Map()),
         savePhotoUri: vi.fn(),
       },
       {},

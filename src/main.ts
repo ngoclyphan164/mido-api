@@ -42,7 +42,7 @@ async function bootstrap(): Promise<void> {
       allowedHeaders: ['Authorization', 'Content-Type'],
       maxAge: 86_400,
     });
-    logger.log(`CORS bật cho: ${allowedOrigins.join(', ')}`);
+    logger.log(`CORS enabled for: ${allowedOrigins.join(', ')}`);
   }
 
   app.setGlobalPrefix('v1', {
@@ -63,7 +63,7 @@ async function bootstrap(): Promise<void> {
       app,
       new DocumentBuilder()
         .setTitle('mido API')
-        .setDescription('Tìm điểm hẹn ở giữa cho nhóm bạn')
+        .setDescription('Find a fair meeting point in the middle for your group')
         .setVersion('0.1.0')
         .addBearerAuth()
         .build(),
@@ -74,7 +74,7 @@ async function bootstrap(): Promise<void> {
   const port = config.get<number>('PORT') ?? 3000;
   await app.listen(port);
 
-  logger.log(`mido-api đang chạy tại ${await app.getUrl()}`);
+  logger.log(`mido-api is running at ${await app.getUrl()}`);
   if (shouldExposeDocs()) logger.log('Swagger: /docs');
 }
 

@@ -34,7 +34,7 @@ export class HangoutService {
 
   async create(groupId: string, userId: string, input: CreateHangoutInput) {
     if (!(await this.repository.isGroupMember(groupId, userId))) {
-      throw new NotFoundException('Không tìm thấy nhóm hoặc bạn không thuộc nhóm này');
+      throw new NotFoundException('Group not found, or you are not a member of it');
     }
     const hangoutId = await this.repository.create(groupId, userId, input);
     return this.detail(hangoutId, userId);
@@ -42,14 +42,15 @@ export class HangoutService {
 
   async listForGroup(groupId: string, userId: string) {
     if (!(await this.repository.isGroupMember(groupId, userId))) {
-      throw new NotFoundException('Không tìm thấy nhóm hoặc bạn không thuộc nhóm này');
+      throw new NotFoundException('Group not found, or you are not a member of it');
     }
     return this.repository.listForGroup(groupId);
   }
 
   async detail(hangoutId: string, userId: string) {
     const hangout = await this.repository.findDetail(hangoutId, userId);
-    if (!hangout) throw new NotFoundException('Không tìm thấy kèo hoặc bạn không thuộc nhóm này');
+    if (!hangout)
+      throw new NotFoundException('Hangout not found, or you are not a member of its group');
     // Chỉ kèo đã chốt mới có địa điểm để trả; kèo đang lên không đụng tới
     // bảng snapshot lẫn Google.
     if (!hangout.outing) return hangout;
@@ -68,12 +69,10 @@ export class HangoutService {
     switch (result.kind) {
       case 'ok':
         return result.hangout;
-      case 'forbidden':
-        throw new ForbiddenException('Chỉ người tạo kèo hoặc owner/admin mới được sửa kèo');
       case 'immutable':
-        throw new ConflictException(`Không thể sửa kèo đang ở trạng thái ${result.status}`);
+        throw new ConflictException(`Cannot edit a hangout with status ${result.status}`);
       case 'not_found':
-        throw new NotFoundException('Không tìm thấy kèo hoặc bạn không thuộc nhóm này');
+        throw new NotFoundException('Hangout not found, or you are not a member of its group');
     }
   }
 
@@ -82,14 +81,12 @@ export class HangoutService {
     switch (result.kind) {
       case 'ok':
         return;
-      case 'forbidden':
-        throw new ForbiddenException('Chỉ người tạo kèo hoặc owner/admin mới được xóa kèo');
       case 'immutable':
         throw new ConflictException(
-          `Không thể xóa kèo đang ở trạng thái ${result.status} vì có dữ liệu outing/fairness`,
+          `Cannot delete a hangout with status ${result.status}: it already has outing/fairness data`,
         );
       case 'not_found':
-        throw new NotFoundException('Không tìm thấy kèo hoặc bạn không thuộc nhóm này');
+        throw new NotFoundException('Hangout not found, or you are not a member of its group');
     }
   }
 
@@ -99,14 +96,14 @@ export class HangoutService {
     const hangout = await this.detail(hangoutId, userId);
     if (hangout.status === 'done' || hangout.status === 'cancelled') {
       throw new ForbiddenException(
-        `Không sửa được vị trí khi kèo đang ở trạng thái ${hangout.status}`,
+        `Cannot change your location while the hangout has status ${hangout.status}`,
       );
     }
 
     const resolved = await this.resolveOrigin(userId, input);
 
     const participant = await this.repository.upsertOwnParticipant(hangoutId, userId, resolved);
-    if (!participant) throw new NotFoundException('Không tìm thấy profile của bạn');
+    if (!participant) throw new NotFoundException('Your participant record was not found');
     return participant;
   }
 
@@ -127,7 +124,7 @@ export class HangoutService {
     }
 
     const saved = await this.savedLocations.findOwned(savedLocationId, userId);
-    if (!saved) throw new NotFoundException('Không tìm thấy địa điểm đã lưu');
+    if (!saved) throw new NotFoundException('Saved location not found');
 
     return {
       ...rest,

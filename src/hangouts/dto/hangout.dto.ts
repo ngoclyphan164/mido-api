@@ -13,7 +13,7 @@ const activityTypeSchema = z
   .min(1)
   .max(50)
   .refine((value) => placeTypesForActivity(value) !== undefined, {
-    message: 'Activity type chưa được hỗ trợ',
+    message: 'Unsupported activity type',
   });
 
 const fairnessModeSchema = z.enum(['balanced', 'fairest', 'fastest', 'weighted']);
@@ -49,7 +49,7 @@ export class UpdateHangoutDto extends createZodDto(
       timeCapSeconds: timeCapSecondsSchema.optional(),
     })
     .refine((value) => Object.keys(value).length > 0, {
-      message: 'Cần ít nhất một trường để cập nhật',
+      message: 'Provide at least one field to update',
     }),
 ) {}
 
@@ -77,13 +77,13 @@ export class UpsertParticipantDto extends createZodDto(
       const hasHalfCoordinate = (value.lat === undefined) !== (value.lng === undefined);
 
       if (hasHalfCoordinate) {
-        ctx.addIssue({ code: z.ZodIssueCode.custom, message: 'lat và lng phải gửi cùng nhau' });
+        ctx.addIssue({ code: z.ZodIssueCode.custom, message: 'lat and lng must be sent together' });
         return;
       }
       if (hasCoordinate === (value.savedLocationId !== undefined)) {
         ctx.addIssue({
           code: z.ZodIssueCode.custom,
-          message: 'Gửi lat/lng hoặc savedLocationId, đúng một trong hai',
+          message: 'Send either lat/lng or savedLocationId, exactly one of the two',
         });
       }
     }),

@@ -61,7 +61,7 @@ export class GooglePlacePhotosProvider implements PlacePhotoProvider {
       return photoMediaResponseSchema.parse(payload).photoUri;
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
-      this.logger.warn(`Không lấy được ảnh cho ${photo.name}: ${message}`);
+      this.logger.warn(`Could not fetch the photo for ${photo.name}: ${message}`);
       return undefined;
     }
   }

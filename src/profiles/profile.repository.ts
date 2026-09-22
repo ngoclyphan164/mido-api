@@ -69,7 +69,7 @@ export class ProfileRepository {
     // Re-read rather than trusting `returning`: a concurrent request may have
     // won the insert, in which case its row is the one to hand back.
     const created = await this.find(userId);
-    if (!created) throw new Error('Không tạo được profile cho người dùng hiện tại');
+    if (!created) throw new Error('Could not create a profile for the current user');
     return created;
   }
 

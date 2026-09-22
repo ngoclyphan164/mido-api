@@ -17,7 +17,7 @@ import { PlacesModule } from './places/places.module';
 import { ProfileModule } from './profiles/profile.module';
 import { SavedLocationModule } from './saved-locations/saved-location.module';
 import { SuggestionModule } from './suggestions/suggestion.module';
-import { VoteModule } from './votes/vote.module';
+import { PickModule } from './picks/pick.module';
 
 @Module({
   imports: [
@@ -44,7 +44,7 @@ import { VoteModule } from './votes/vote.module';
     ProfileModule,
     SavedLocationModule,
     SuggestionModule,
-    VoteModule,
+    PickModule,
     FairnessModule,
     CronModule,
   ],

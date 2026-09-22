@@ -122,7 +122,7 @@ export class SavedLocationRepository {
             address: input.address ?? null,
           })
           .returning(columns);
-        if (!row) throw new Error('Không lưu được địa điểm');
+        if (!row) throw new Error('Could not save the location');
         return { kind: 'ok', location: toView(row) };
       } catch (error) {
         if (isDuplicateLabel(error)) return { kind: 'duplicate_label' };

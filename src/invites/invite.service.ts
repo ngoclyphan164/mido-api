@@ -16,9 +16,9 @@ export class InviteService {
       case 'ok':
         return result.preview;
       case 'expired':
-        throw new GoneException('Link mời đã hết hiệu lực, xin chủ nhóm tạo link mới');
+        throw new GoneException('This invite link has expired; ask the group owner for a new one');
       case 'not_found':
-        throw new NotFoundException('Mã mời không đúng');
+        throw new NotFoundException('Invalid invite code');
     }
   }
 }

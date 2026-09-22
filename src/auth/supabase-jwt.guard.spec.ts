@@ -60,7 +60,7 @@ describe('SupabaseJwtGuard', () => {
     verifier.verify.mockRejectedValue(new Error('JWKS network detail'));
 
     await expect(guard.canActivate(context)).rejects.toMatchObject({
-      message: 'Access token không hợp lệ hoặc đã hết hạn',
+      message: 'Access token is invalid or has expired',
     });
   });
 });

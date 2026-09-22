@@ -43,7 +43,7 @@ describe('SupabaseAdminService', () => {
     const service = new SupabaseAdminService(config as unknown as ConfigService);
 
     await expect(service.deleteUser('3f8f2c43-b10d-4cd0-92d8-cc40ef58a0e8')).rejects.toEqual(
-      new BadGatewayException('Chưa thể xóa tài khoản lúc này. Vui lòng thử lại.'),
+      new BadGatewayException('Could not delete the account right now. Please try again.'),
     );
   });
 

@@ -1,4 +1,4 @@
-import { ConflictException, ForbiddenException, NotFoundException } from '@nestjs/common';
+import { ConflictException, NotFoundException } from '@nestjs/common';
 import { describe, expect, it, vi } from 'vitest';
 
 import type { SavedLocationRepository } from '../saved-locations/saved-location.repository';
@@ -13,7 +13,7 @@ const snapshots = { getChosenForHangout: vi.fn() } as unknown as SuggestionSnaps
 const savedLocations = { findOwned: vi.fn() } as unknown as SavedLocationRepository;
 
 describe('HangoutService management', () => {
-  it('trả hangout sau khi creator/owner/admin cập nhật', async () => {
+  it('trả hangout sau khi một thành viên bất kỳ cập nhật', async () => {
     const hangout = { id: 'hangout-id', activityType: 'food' };
     const repository = {
       update: vi.fn().mockResolvedValue({ kind: 'ok', hangout }),
@@ -29,9 +29,15 @@ describe('HangoutService management', () => {
     );
   });
 
-  it('chặn thành viên thường không phải creator', async () => {
+  /*
+    Từng có một test chặn "thành viên thường không phải creator" ở đây. Luật đã
+    đổi: kèo là của cả nhóm, nên mọi thành viên đều sửa và xóa được, và
+    repository không còn trả `forbidden` nữa. Phân quyền còn lại là tư cách
+    thành viên, và nó đi ra ngoài bằng 404 — xem test cuối cùng.
+  */
+  it('cho thành viên thường xóa kèo do người khác tạo', async () => {
     const repository = {
-      update: vi.fn().mockResolvedValue({ kind: 'forbidden' }),
+      remove: vi.fn().mockResolvedValue({ kind: 'ok' }),
     };
     const service = new HangoutService(
       repository as unknown as HangoutRepository,
@@ -39,9 +45,8 @@ describe('HangoutService management', () => {
       savedLocations,
     );
 
-    await expect(
-      service.update('hangout-id', 'user-id', { activityType: 'food' }),
-    ).rejects.toBeInstanceOf(ForbiddenException);
+    await expect(service.remove('hangout-id', 'user-id')).resolves.toBeUndefined();
+    expect(repository.remove).toHaveBeenCalledWith('hangout-id', 'user-id');
   });
 
   it('không sửa/xóa kèo đã chốt để bảo vệ outing và fairness ledger', async () => {

@@ -44,7 +44,6 @@ export const hangoutStatusEnum = pgEnum('hangout_status', [
   'done',
   'cancelled',
 ]);
-export const voteValueEnum = pgEnum('vote_value', ['up', 'down', 'veto']);
 
 export const profiles = pgTable(
   'profiles',
@@ -325,8 +324,18 @@ export const suggestions = pgTable(
   ],
 ).enableRLS();
 
-export const votes = pgTable(
-  'votes',
+/**
+ * Mỗi thành viên tick đúng một quán cho mỗi kèo.
+ *
+ * Luật đó nằm ở unique index trên `participant_id` chứ không ở tầng code:
+ * participant vốn đã thuộc về đúng một kèo, nên "một pick cho mỗi participant"
+ * chính là "một lựa chọn cho mỗi người trong mỗi kèo". Đổi ý là UPDATE hàng cũ
+ * chứ không thêm hàng mới.
+ *
+ * Thay cho bảng `votes` cũ (up/down/veto): xem migration 0013.
+ */
+export const picks = pgTable(
+  'picks',
   {
     id: uuid('id').defaultRandom().primaryKey(),
     suggestionId: uuid('suggestion_id')
@@ -335,12 +344,11 @@ export const votes = pgTable(
     participantId: uuid('participant_id')
       .notNull()
       .references(() => participants.id, { onDelete: 'cascade' }),
-    value: voteValueEnum('value').notNull(),
     ...timestamps,
   },
   (table) => [
-    uniqueIndex('votes_suggestion_participant_uidx').on(table.suggestionId, table.participantId),
-    index('votes_suggestion_idx').on(table.suggestionId),
+    uniqueIndex('picks_participant_uidx').on(table.participantId),
+    index('picks_suggestion_idx').on(table.suggestionId),
   ],
 ).enableRLS();
 
@@ -489,7 +497,7 @@ export const phaseThreeSchema = {
 
 export const phaseFiveSchema = {
   suggestions,
-  votes,
+  picks,
 };
 
 export const phaseSixSchema = {
